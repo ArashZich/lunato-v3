@@ -29,7 +29,8 @@ create_required_directories()
 
 # بررسی وجود داشتن فایل داده‌های مرجع
 if not os.path.exists(settings.FACE_SHAPE_DATA_PATH):
-    logging.warning(f"فایل داده‌های مرجع شکل صورت در مسیر {settings.FACE_SHAPE_DATA_PATH} یافت نشد!")
+    logging.warning(
+        f"فایل داده‌های مرجع شکل صورت در مسیر {settings.FACE_SHAPE_DATA_PATH} یافت نشد!")
 
 # ایجاد نمونه برنامه FastAPI
 app = FastAPI(
@@ -63,14 +64,16 @@ async def db_exception_handler(request: Request, call_next: Callable):
             logger.error(f"خطا در اتصال به دیتابیس: {str(e)}")
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={"detail": "سرویس دیتابیس در دسترس نیست. لطفاً بعداً دوباره امتحان کنید."}
+                content={
+                    "detail": "سرویس دیتابیس در دسترس نیست. لطفاً بعداً دوباره امتحان کنید."}
             )
         raise
     except Exception as e:
         logger.error(f"خطای پیش‌بینی نشده: {str(e)}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "خطای داخلی سرور رخ داده است. لطفاً بعداً دوباره امتحان کنید."}
+            content={
+                "detail": "خطای داخلی سرور رخ داده است. لطفاً بعداً دوباره امتحان کنید."}
         )
 
 
@@ -96,38 +99,52 @@ async def startup_event():
     رویداد راه‌اندازی برنامه
     """
     logging.info("سیستم تشخیص چهره و پیشنهاد فریم عینک در حال راه‌اندازی...")
-    
+
     # بررسی و ایجاد دایرکتوری داده در صورت نیاز
     os.makedirs(os.path.dirname(settings.FACE_SHAPE_DATA_PATH), exist_ok=True)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    
+
     # اتصال به MongoDB با چند بار تلاش
     max_retries = 5
     retry_delay = 5  # ثانیه
-    
+
     for attempt in range(max_retries):
         try:
             await connect_to_mongo()
             logging.info("اتصال به MongoDB با موفقیت برقرار شد")
-            
+
             # ایجاد ایندکس‌های دیتابیس
             await create_database_indexes()
-            
+
             # بررسی و بروزرسانی داده‌های تحلیلی
             await check_and_update_request_analytics()
-            
-            # راه‌اندازی کش محصولات WooCommerce (در یک تسک جداگانه تا مانع راه‌اندازی سریع سیستم نشود)
+
+            # بررسی استفاده از داده‌های مصنوعی
+            use_mock_data = os.environ.get(
+                'USE_MOCK_DATA', 'false').lower() == 'true'
+
+            # راه‌اندازی کش محصولات WooCommerce یا داده‌های مصنوعی
+            if use_mock_data:
+                from app.services.woocommerce_mock import initialize_product_cache
+                logging.info("استفاده از داده‌های مصنوعی WooCommerce فعال شد")
+            else:
+                from app.services.woocommerce import initialize_product_cache
+                logging.info("استفاده از API واقعی WooCommerce فعال شد")
+
+            # راه‌اندازی کش در یک تسک جداگانه
             asyncio.create_task(initialize_product_cache())
-            
+
             break
         except Exception as e:
             if attempt < max_retries - 1:
-                logging.warning(f"خطا در اتصال به MongoDB (تلاش {attempt+1}/{max_retries}): {str(e)}")
+                logging.warning(
+                    f"خطا در اتصال به MongoDB (تلاش {attempt+1}/{max_retries}): {str(e)}")
                 await asyncio.sleep(retry_delay)
             else:
-                logging.error(f"خطا در اتصال به MongoDB پس از {max_retries} تلاش: {str(e)}")
-                # در حالت آخر می‌توانیم خطا را بالا بفرستیم یا بدون دیتابیس ادامه دهیم
-                logging.warning("برنامه بدون اتصال به دیتابیس ادامه می‌یابد. برخی عملکردها محدود خواهند بود.")
+                logging.error(
+                    f"خطا در اتصال به MongoDB پس از {max_retries} تلاش: {str(e)}")
+                logging.warning(
+                    "برنامه بدون اتصال به دیتابیس ادامه می‌یابد. برخی عملکردها محدود خواهند بود.")
 
 
 @app.on_event("shutdown")
@@ -136,7 +153,7 @@ async def shutdown_event():
     رویداد خاموش شدن برنامه
     """
     logging.info("سیستم تشخیص چهره و پیشنهاد فریم عینک در حال خاموش شدن...")
-    
+
     # بستن اتصال MongoDB
     await close_mongo_connection()
 
@@ -156,7 +173,7 @@ async def root():
 # راه‌اندازی کارگزاری زمان‌بندی‌شده برای بروزرسانی آمارها
 async def start_scheduled_tasks():
     """شروع کارهای زمان‌بندی‌شده"""
-    
+
     async def update_analytics_data():
         """بروزرسانی دوره‌ای داده‌های تحلیلی"""
         while True:
@@ -166,8 +183,9 @@ async def start_scheduled_tasks():
                 await asyncio.sleep(12 * 60 * 60)
             except Exception as e:
                 logger.error(f"خطا در بروزرسانی داده‌های تحلیلی: {str(e)}")
-                await asyncio.sleep(60 * 60)  # در صورت خطا، یک ساعت صبر می‌کنیم
-    
+                # در صورت خطا، یک ساعت صبر می‌کنیم
+                await asyncio.sleep(60 * 60)
+
     # شروع تسک در پس‌زمینه
     asyncio.create_task(update_analytics_data())
 
@@ -181,7 +199,7 @@ async def start_scheduler():
 # راه‌اندازی برنامه با uvicorn در صورت اجرای مستقیم این فایل
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "app.main:app",
         host=settings.API_HOST,

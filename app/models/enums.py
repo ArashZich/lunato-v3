@@ -9,9 +9,7 @@ class FaceShapeEnum(str, Enum):
     SQUARE = "SQUARE"  # مربعی
     HEART = "HEART"  # قلبی
     OBLONG = "OBLONG"  # کشیده
-    DIAMOND = "DIAMOND"  # لوزی
-    TRIANGLE = "TRIANGLE"  # مثلثی
-    
+
     @classmethod
     def get_description(cls, shape_name):
         """دریافت توضیحات فارسی شکل چهره"""
@@ -20,8 +18,6 @@ class FaceShapeEnum(str, Enum):
             cls.ROUND: "گرد",
             cls.SQUARE: "مربعی",
             cls.HEART: "قلبی",
-            cls.OBLONG: "کشیده",
-            cls.DIAMOND: "لوزی",
-            cls.TRIANGLE: "مثلثی"
+            cls.OBLONG: "کشیده"
         }
         return descriptions.get(shape_name, "نامشخص")

@@ -4,8 +4,8 @@ from typing import Dict, Any, List, Optional, Tuple
 import asyncio
 
 from app.config import settings
-from app.core.face_analysis import load_face_shape_data, get_recommended_frame_types
-from app.services.woocommerce import get_recommended_frames
+from app.core.face_shape_data import load_face_shape_data, get_recommended_frame_types
+from app.services import get_recommended_frames
 from app.models.responses import RecommendedFrame
 
 
@@ -24,7 +24,14 @@ async def match_frames_to_face_shape(
     """
     try:
         logger.info(f"تطبیق فریم‌های مناسب برای شکل چهره {face_shape}")
-        
+
+        # بررسی معتبر بودن شکل چهره
+        valid_shapes = {"HEART", "OBLONG", "OVAL", "ROUND", "SQUARE"}
+        if face_shape not in valid_shapes:
+            logger.warning(
+                f"شکل چهره {face_shape} معتبر نیست. استفاده از OVAL به عنوان پیش‌فرض.")
+            face_shape = "OVAL"
+
         # دریافت فریم‌های پیشنهادی از WooCommerce
         frames_result = await get_recommended_frames(
             face_shape=face_shape,
@@ -32,16 +39,17 @@ async def match_frames_to_face_shape(
             max_price=max_price,
             limit=limit
         )
-        
+
         if not frames_result.get("success", False):
-            logger.warning(f"خطا در دریافت فریم‌های پیشنهادی: {frames_result.get('message')}")
+            logger.warning(
+                f"خطا در دریافت فریم‌های پیشنهادی: {frames_result.get('message')}")
             return {
                 "success": False,
                 "message": frames_result.get("message", "خطا در دریافت فریم‌های پیشنهادی")
             }
-        
+
         return frames_result
-        
+
     except Exception as e:
         logger.error(f"خطا در تطبیق فریم‌ها: {str(e)}")
         return {
@@ -61,14 +69,22 @@ async def get_combined_result(
     """
     try:
         logger.info(f"دریافت نتیجه ترکیبی برای شکل چهره {face_shape}")
-        
+
+        # بررسی معتبر بودن شکل چهره
+        valid_shapes = {"HEART", "OBLONG", "OVAL", "ROUND", "SQUARE"}
+        if face_shape not in valid_shapes:
+            logger.warning(
+                f"شکل چهره {face_shape} معتبر نیست. استفاده از OVAL به عنوان پیش‌فرض.")
+            face_shape = "OVAL"
+
         # دریافت اطلاعات شکل چهره
         face_shape_data = load_face_shape_data()
-        face_shape_info = face_shape_data.get("face_shapes", {}).get(face_shape, {})
-        
+        face_shape_info = face_shape_data.get(
+            "face_shapes", {}).get(face_shape, {})
+
         # دریافت انواع فریم پیشنهادی
         recommended_frame_types = get_recommended_frame_types(face_shape)
-        
+
         # دریافت فریم‌های پیشنهادی
         frames_result = await match_frames_to_face_shape(
             face_shape=face_shape,
@@ -76,7 +92,7 @@ async def get_combined_result(
             max_price=max_price,
             limit=limit
         )
-        
+
         # ساخت نتیجه نهایی
         result = {
             "success": frames_result.get("success", False),
@@ -85,15 +101,16 @@ async def get_combined_result(
             "recommendation": face_shape_info.get("recommendation", ""),
             "recommended_frame_types": recommended_frame_types
         }
-        
+
         # اگر دریافت فریم‌ها موفقیت‌آمیز بود، افزودن فریم‌ها به نتیجه
         if frames_result.get("success", False):
             # تبدیل دیکشنری‌ها به مدل Pydantic
             from app.models.responses import RecommendedFrame
-            
-            recommended_frames_dicts = frames_result.get("recommended_frames", [])
+
+            recommended_frames_dicts = frames_result.get(
+                "recommended_frames", [])
             recommended_frames = []
-            
+
             for frame_dict in recommended_frames_dicts:
                 try:
                     # مطمئن شویم که regular_price یک string است یا None
@@ -102,7 +119,7 @@ async def get_combined_result(
                         regular_price = None
                     elif regular_price is not None:
                         regular_price = str(regular_price)
-                        
+
                     recommended_frame = RecommendedFrame(
                         id=frame_dict.get("id"),
                         name=frame_dict.get("name"),
@@ -115,18 +132,20 @@ async def get_combined_result(
                     )
                     recommended_frames.append(recommended_frame)
                 except Exception as e:
-                    logger.warning(f"خطا در تبدیل فریم به مدل Pydantic: {str(e)}")
+                    logger.warning(
+                        f"خطا در تبدیل فریم به مدل Pydantic: {str(e)}")
                     # استفاده از دیکشنری اصلی در صورت خطا
                     recommended_frames.append(frame_dict)
-            
+
             result["recommended_frames"] = recommended_frames
             result["total_matches"] = frames_result.get("total_matches", 0)
         else:
             # در صورت خطا، افزودن پیام خطا
-            result["message"] = frames_result.get("message", "خطا در دریافت فریم‌های پیشنهادی")
-        
+            result["message"] = frames_result.get(
+                "message", "خطا در دریافت فریم‌های پیشنهادی")
+
         return result
-        
+
     except Exception as e:
         logger.error(f"خطا در دریافت نتیجه ترکیبی: {str(e)}")
         return {
