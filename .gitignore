@@ -137,3 +137,7 @@ uploads/
 
 # Environment variables
 .env
+
+# Dataset
+testing_set
+training_set
