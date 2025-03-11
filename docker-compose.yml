@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  # سرویس API
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DEBUG=true
+      - ENVIRONMENT=development
+      - MONGODB_HOST=mongo
+      - MONGODB_PORT=27017
+      - MONGODB_USERNAME=eyeglass_admin
+      - MONGODB_PASSWORD=secure_password123
+      - MONGODB_DB_NAME=eyeglass_recommendation
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
+      - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
+      - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
+    depends_on:
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # سرویس Celery Worker برای تشخیص چهره
+  worker_face_detection:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_face_detection@%h --queues=face_detection
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - MONGODB_HOST=mongo
+      - MONGODB_PORT=27017
+      - MONGODB_USERNAME=eyeglass_admin
+      - MONGODB_PASSWORD=secure_password123
+      - MONGODB_DB_NAME=eyeglass_recommendation
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
+      - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
+      - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
+    depends_on:
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # سرویس Celery Worker برای تحلیل چهره
+  worker_face_analysis:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_face_analysis@%h --queues=face_analysis
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - MONGODB_HOST=mongo
+      - MONGODB_PORT=27017
+      - MONGODB_USERNAME=eyeglass_admin
+      - MONGODB_PASSWORD=secure_password123
+      - MONGODB_DB_NAME=eyeglass_recommendation
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
+      - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
+      - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
+    depends_on:
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # سرویس Celery Worker برای پیشنهاد فریم
+  worker_frame_matching:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_frame_matching@%h --queues=frame_matching
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - MONGODB_HOST=mongo
+      - MONGODB_PORT=27017
+      - MONGODB_USERNAME=eyeglass_admin
+      - MONGODB_PASSWORD=secure_password123
+      - MONGODB_DB_NAME=eyeglass_recommendation
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
+      - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
+      - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
+    depends_on:
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # MongoDB با نسخه 4.4
+  mongo:
+    image: mongo:4.4
+    ports:
+      - "27017:27017"
+    command: mongod
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=eyeglass_admin
+      - MONGO_INITDB_ROOT_PASSWORD=secure_password123
+      - MONGO_INITDB_DATABASE=eyeglass_recommendation
+    volumes:
+      - mongo_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    restart: unless-stopped
+
+  # Redis برای Celery
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
