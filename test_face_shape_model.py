@@ -7,6 +7,8 @@ import mediapipe as mp
 import argparse
 from PIL import Image, ImageDraw, ImageFont
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import random
 
 # تنظیم لاگر
 logging.basicConfig(level=logging.INFO,
@@ -24,7 +26,9 @@ SHAPE_NAMES = {
     'OBLONG': 'کشیده',
     'OVAL': 'بیضی',
     'ROUND': 'گرد',
-    'SQUARE': 'مربعی'
+    'SQUARE': 'مربعی',
+    'DIAMOND': 'لوزی',
+    'TRIANGLE': 'مثلثی'
 }
 
 # نگاشت دسته‌ها به رنگ‌ها برای نمایش
@@ -33,7 +37,9 @@ SHAPE_COLORS = {
     'OBLONG': (0, 255, 0),   # سبز
     'OVAL': (0, 0, 255),     # آبی
     'ROUND': (255, 255, 0),  # زرد
-    'SQUARE': (255, 0, 255)  # بنفش
+    'SQUARE': (255, 0, 255),  # بنفش
+    'DIAMOND': (0, 255, 255),  # فیروزه‌ای
+    'TRIANGLE': (128, 128, 128)  # خاکستری
 }
 
 
@@ -64,6 +70,10 @@ class FaceShapeTester:
         except Exception as e:
             logger.error(f"خطا در بارگیری مدل یا اسکیلر: {str(e)}")
             raise
+
+    def _calculate_distance(self, p1, p2):
+        """محاسبه فاصله اقلیدسی بین دو نقطه"""
+        return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
     def extract_features_from_image(self, image_path=None, image=None):
         """استخراج ویژگی‌های چهره از تصویر با استفاده از MediaPipe"""
@@ -164,13 +174,337 @@ class FaceShapeTester:
                 face_taper_ratio = jaw_width / forehead_width if forehead_width > 0 else 0
 
                 # ساخت بردار ویژگی
-                features = [
+                features = np.array([
                     width_to_length_ratio,
                     cheekbone_to_jaw_ratio,
                     forehead_to_cheekbone_ratio,
                     jaw_angle,
                     face_shape_ratio,
                     face_taper_ratio
-                ]
+                ]).reshape(1, -1)
 
-                # نمایش نقاط کلیدی روی
+                # نمایش نقاط کلیدی روی تصویر
+                img_with_landmarks = self.visualize_landmarks(
+                    img, face_landmarks)
+
+                # برگرداندن ویژگی‌ها و تصویر با نقاط کلیدی
+                return features, img_with_landmarks
+
+        except Exception as e:
+            logger.error(f"خطا در استخراج ویژگی‌ها: {str(e)}")
+            return None, None
+
+    def visualize_landmarks(self, image, landmarks):
+        """نمایش نقاط کلیدی روی تصویر"""
+        img_copy = image.copy()
+
+        # نمایش نقاط اصلی بیضی صورت
+        for idx in self.FACE_OVAL:
+            cv2.circle(img_copy, landmarks[idx], 2, (0, 255, 0), -1)
+
+        # نمایش نقاط چشم‌ها و دهان
+        eye_indices = [33, 133, 362, 263]  # نقاط چشم‌ها
+        mouth_indices = [0, 17, 61, 291]   # نقاط دهان
+
+        for idx in eye_indices:
+            cv2.circle(img_copy, landmarks[idx], 3, (255, 0, 0), -1)
+
+        for idx in mouth_indices:
+            cv2.circle(img_copy, landmarks[idx], 3, (0, 0, 255), -1)
+
+        return img_copy
+
+    def predict_face_shape(self, features):
+        """پیش‌بینی شکل چهره با استفاده از بردار ویژگی"""
+        if features is None:
+            return None, None
+
+        # مقیاس‌دهی ویژگی‌ها
+        if self.scaler is not None:
+            features_scaled = self.scaler.transform(features)
+        else:
+            features_scaled = features
+
+        # پیش‌بینی شکل چهره
+        predicted_shape = self.model.predict(features_scaled)[0]
+
+        # پیش‌بینی احتمالات
+        prediction_proba = self.model.predict_proba(features_scaled)[0]
+        max_proba_idx = np.argmax(prediction_proba)
+        confidence = prediction_proba[max_proba_idx] * 100
+
+        return predicted_shape, confidence
+
+    def test_single_image(self, image_path, output_dir=OUTPUT_DIR):
+        """تست یک تصویر و نمایش نتیجه"""
+        # استخراج ویژگی‌ها
+        features, img_with_landmarks = self.extract_features_from_image(
+            image_path)
+
+        if features is None:
+            logger.error(
+                f"نمی‌توان ویژگی‌ها را از تصویر استخراج کرد: {image_path}")
+            return
+
+        # پیش‌بینی شکل چهره
+        predicted_shape, confidence = self.predict_face_shape(features)
+
+        if predicted_shape is None:
+            logger.error(f"خطا در پیش‌بینی شکل چهره: {image_path}")
+            return
+
+        # ایجاد پوشه خروجی
+        os.makedirs(output_dir, exist_ok=True)
+
+        # نمایش نتیجه
+        result_img = cv2.imread(image_path)
+
+        # افزودن متن پیش‌بینی
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        text = f"Shape: {predicted_shape} ({SHAPE_NAMES.get(predicted_shape, '')})"
+        text_confidence = f"Confidence: {confidence:.2f}%"
+
+        cv2.putText(result_img, text, (10, 30), font, 1,
+                    SHAPE_COLORS.get(predicted_shape, (255, 255, 255)), 2)
+        cv2.putText(result_img, text_confidence,
+                    (10, 70), font, 1, (0, 255, 0), 2)
+
+        # افزودن متن ویژگی‌ها
+        feature_names = [
+            "Width/Length", "Cheekbone/Jaw", "Forehead/Cheekbone",
+            "Jaw Angle", "Face Shape Ratio", "Face Taper"
+        ]
+
+        y_pos = 110
+        for i, feature in enumerate(features[0]):
+            feature_text = f"{feature_names[i]}: {feature:.2f}"
+            cv2.putText(result_img, feature_text,
+                        (10, y_pos), font, 0.5, (0, 0, 0), 1)
+            y_pos += 30
+
+        # ذخیره تصویر نتیجه
+        filename = os.path.basename(image_path)
+        output_path = os.path.join(
+            output_dir, f"result_{predicted_shape}_{filename}")
+        cv2.imwrite(output_path, result_img)
+
+        # ذخیره تصویر با نقاط کلیدی
+        if img_with_landmarks is not None:
+            landmarks_path = os.path.join(
+                output_dir, f"landmarks_{predicted_shape}_{filename}")
+            cv2.imwrite(landmarks_path, img_with_landmarks)
+
+        logger.info(
+            f"نتیجه تست {filename}: شکل چهره {predicted_shape} ({SHAPE_NAMES.get(predicted_shape, '')}) با اطمینان {confidence:.2f}%")
+        logger.info(
+            f"تصاویر نتیجه در {output_path} و {landmarks_path} ذخیره شدند")
+
+        return predicted_shape, confidence
+
+    def test_batch(self, test_dir, output_dir=OUTPUT_DIR, num_samples=10):
+        """تست مجموعه‌ای از تصاویر از هر دسته"""
+        os.makedirs(output_dir, exist_ok=True)
+
+        results = {}
+        confusion_matrix = {}
+
+        # تست هر دسته
+        for shape_dir in os.listdir(test_dir):
+            shape_path = os.path.join(test_dir, shape_dir)
+
+            # تبدیل نام پوشه به کلاس استاندارد
+            true_shape = shape_dir.upper()
+
+            if not os.path.isdir(shape_path):
+                continue
+
+            if true_shape not in confusion_matrix:
+                confusion_matrix[true_shape] = {}
+
+            # لیست فایل‌های تصویر
+            image_files = [f for f in os.listdir(
+                shape_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+
+            # انتخاب تعدادی نمونه تصادفی
+            if len(image_files) > num_samples:
+                selected_files = random.sample(image_files, num_samples)
+            else:
+                selected_files = image_files
+
+            shape_results = []
+
+            # تست هر تصویر
+            logger.info(
+                f"تست {len(selected_files)} تصویر از نوع {true_shape}...")
+
+            for image_file in tqdm(selected_files, desc=f"Testing {true_shape}"):
+                image_path = os.path.join(shape_path, image_file)
+
+                # استخراج ویژگی‌ها
+                features, _ = self.extract_features_from_image(image_path)
+
+                if features is None:
+                    continue
+
+                # پیش‌بینی شکل چهره
+                predicted_shape, confidence = self.predict_face_shape(features)
+
+                if predicted_shape is None:
+                    continue
+
+                # افزودن به نتایج
+                shape_results.append({
+                    "file": image_file,
+                    "predicted": predicted_shape,
+                    "confidence": confidence,
+                    "features": features[0].tolist()
+                })
+
+                # افزودن به ماتریس درهم‌ریختگی
+                if predicted_shape not in confusion_matrix[true_shape]:
+                    confusion_matrix[true_shape][predicted_shape] = 0
+                confusion_matrix[true_shape][predicted_shape] += 1
+
+                # ذخیره تصویر نتیجه برای چند نمونه
+                if len(shape_results) <= 3:  # فقط 3 تصویر نمونه را ذخیره می‌کنیم
+                    self.test_single_image(image_path, output_dir)
+
+            # محاسبه دقت برای این دسته
+            if len(shape_results) > 0:
+                correct = sum(
+                    1 for r in shape_results if r["predicted"] == true_shape)
+                accuracy = correct / len(shape_results) * 100
+
+                results[true_shape] = {
+                    "accuracy": accuracy,
+                    "samples": len(shape_results),
+                    "results": shape_results
+                }
+
+                logger.info(
+                    f"دقت برای {true_shape}: {accuracy:.2f}% ({correct}/{len(shape_results)})")
+            else:
+                logger.warning(f"هیچ نتیجه‌ای برای {true_shape} یافت نشد")
+
+        # ذخیره نتایج
+        self.save_results(results, confusion_matrix, output_dir)
+
+        return results, confusion_matrix
+
+    def save_results(self, results, confusion_matrix, output_dir):
+        """ذخیره نتایج و نمایش گرافیکی"""
+        import json
+        import pandas as pd
+        import seaborn as sns
+
+        # ذخیره نتایج به صورت JSON
+        with open(os.path.join(output_dir, 'test_results.json'), 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=4)
+
+        # نمایش نتایج در کنسول
+        logger.info("\n===== نتایج نهایی =====")
+        for shape, result in results.items():
+            logger.info(
+                f"{shape} ({SHAPE_NAMES.get(shape, '')}): {result['accuracy']:.2f}% دقت")
+
+        # ایجاد ماتریس درهم‌ریختگی
+        all_shapes = sorted(list(set(list(confusion_matrix.keys()) +
+                                     [shape for shapes in confusion_matrix.values() for shape in shapes.keys()])))
+
+        cm_data = []
+        for true_shape in all_shapes:
+            row = []
+            for pred_shape in all_shapes:
+                if true_shape in confusion_matrix and pred_shape in confusion_matrix[true_shape]:
+                    row.append(confusion_matrix[true_shape][pred_shape])
+                else:
+                    row.append(0)
+            cm_data.append(row)
+
+        cm_df = pd.DataFrame(cm_data, index=all_shapes, columns=all_shapes)
+
+        # نمایش ماتریس درهم‌ریختگی
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues')
+        plt.xlabel('پیش‌بینی شده')
+        plt.ylabel('واقعی')
+        plt.title('ماتریس درهم‌ریختگی شکل چهره')
+        plt.savefig(os.path.join(output_dir, 'confusion_matrix.png'))
+
+        # نمایش دقت برای هر دسته
+        accuracies = [results[shape]['accuracy']
+                      for shape in all_shapes if shape in results]
+
+        plt.figure(figsize=(12, 6))
+        bars = plt.bar(range(len(all_shapes)),
+                       [results.get(shape, {'accuracy': 0})['accuracy']
+                        for shape in all_shapes])
+
+        # تبدیل رنگ‌های BGR به RGB برای matplotlib
+        for i, shape in enumerate(all_shapes):
+            if shape in SHAPE_COLORS:
+                bgr_color = SHAPE_COLORS[shape]
+                # تبدیل از BGR به RGB و نرمال‌سازی به محدوده 0-1
+                rgb_color = (bgr_color[2]/255,
+                             bgr_color[1]/255, bgr_color[0]/255)
+                bars[i].set_color(rgb_color)
+
+        plt.xticks(range(len(all_shapes)), [
+                   f"{shape}\n({SHAPE_NAMES.get(shape, '')})" for shape in all_shapes], rotation=45)
+        plt.ylabel('دقت (%)')
+        plt.title('دقت تشخیص برای هر شکل چهره')
+        plt.ylim(0, 100)
+
+        # افزودن مقدار دقت روی نمودار
+        for i, acc in enumerate([results.get(shape, {'accuracy': 0})['accuracy'] for shape in all_shapes]):
+            plt.text(i, acc + 2, f"{acc:.1f}%", ha='center')
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'accuracy_by_shape.png'))
+
+        logger.info(f"نتایج و نمودارها در {output_dir} ذخیره شدند")
+
+
+def main():
+    # پردازش آرگومان‌های خط فرمان
+    parser = argparse.ArgumentParser(description='تست مدل تشخیص شکل چهره')
+    parser.add_argument('--test_dir', type=str, default='testing_set',
+                        help='مسیر پوشه تصاویر تست (پیش‌فرض: testing_set)')
+    parser.add_argument('--output_dir', type=str, default='test_results',
+                        help='مسیر پوشه خروجی (پیش‌فرض: test_results)')
+    parser.add_argument('--single_image', type=str, default=None,
+                        help='مسیر یک تصویر خاص برای تست')
+    parser.add_argument('--model_path', type=str, default='data/face_shape_model.pkl',
+                        help='مسیر فایل مدل (پیش‌فرض: data/face_shape_model.pkl)')
+    parser.add_argument('--scaler_path', type=str, default='data/face_shape_model_scaler.pkl',
+                        help='مسیر فایل اسکیلر (پیش‌فرض: data/face_shape_model_scaler.pkl)')
+    parser.add_argument('--num_samples', type=int, default=10,
+                        help='تعداد نمونه‌های تست از هر دسته (پیش‌فرض: 10)')
+
+    args = parser.parse_args()
+
+    # راه‌اندازی تستر
+    try:
+        tester = FaceShapeTester(args.model_path, args.scaler_path)
+
+        # تست یک تصویر خاص
+        if args.single_image:
+            if os.path.exists(args.single_image):
+                tester.test_single_image(args.single_image, args.output_dir)
+            else:
+                logger.error(f"تصویر مورد نظر یافت نشد: {args.single_image}")
+
+        # تست دسته‌ای
+        else:
+            if os.path.exists(args.test_dir):
+                results, confusion_matrix = tester.test_batch(
+                    args.test_dir, args.output_dir, args.num_samples)
+            else:
+                logger.error(f"پوشه تست یافت نشد: {args.test_dir}")
+
+    except Exception as e:
+        logger.error(f"خطا در اجرای تست: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()
