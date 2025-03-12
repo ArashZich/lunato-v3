@@ -242,8 +242,8 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
         faces = face_cascade.detectMultiScale(
             enhanced_gray,
             scaleFactor=1.05,       # کاهش مقدار برای تشخیص بیشتر
-            minNeighbors=3,         # کاهش مقدار برای تشخیص بیشتر
-            minSize=(30, 30),
+            minNeighbors=2,         # کاهش مقدار برای تشخیص بیشتر
+            minSize=(20, 20),       # کاهش حداقل اندازه چهره
             flags=cv2.CASCADE_SCALE_IMAGE
         )
 
@@ -252,8 +252,8 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
             faces = face_cascade.detectMultiScale(
                 enhanced_gray,
                 scaleFactor=1.03,
-                minNeighbors=2,
-                minSize=(20, 20),
+                minNeighbors=1,     # کاهش بیشتر مقدار برای تشخیص بیشتر
+                minSize=(10, 10),   # کاهش بیشتر حداقل اندازه چهره
                 flags=cv2.CASCADE_SCALE_IMAGE
             )
 
@@ -487,7 +487,7 @@ def preprocess_image_for_face_detection(image: np.ndarray) -> np.ndarray:
     پیش‌پردازش تصویر برای تشخیص بهتر چهره
     """
     # تغییر اندازه تصویر اگر خیلی بزرگ است
-    max_dim = 1200
+    max_dim = 1200  # حداکثر ابعاد تصویر برای تشخیص چهره
     h, w = image.shape[:2]
 
     if max(h, w) > max_dim:
@@ -514,12 +514,6 @@ def preprocess_image_for_face_detection(image: np.ndarray) -> np.ndarray:
 def get_face_image(image: np.ndarray) -> Tuple[bool, Dict[str, Any], Optional[np.ndarray]]:
     """
     تشخیص چهره و برش تصویر چهره.
-
-    Args:
-        image: تصویر OpenCV
-
-    Returns:
-        tuple: (موفقیت، نتیجه، تصویر_برش_خورده)
     """
     try:
         logger.info("شروع تشخیص چهره در تصویر...")
@@ -569,7 +563,8 @@ def get_face_image(image: np.ndarray) -> Tuple[bool, Dict[str, Any], Optional[np
         face_percentage = (face_area / image_area) * 100
         logger.info(f"درصد اشغال تصویر توسط چهره: {face_percentage:.2f}%")
 
-        if face_percentage < 5:
+        # کاهش حداقل درصد اشغال تصویر توسط چهره به ۱٪
+        if face_percentage < 1:  # قبلاً ۵ بود
             logger.warning(
                 f"چهره تشخیص داده شده خیلی کوچک است (فقط {face_percentage:.2f}% از تصویر)")
             return False, {

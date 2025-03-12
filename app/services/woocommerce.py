@@ -107,7 +107,7 @@ def start_scheduled_updates():
         "زمان‌بندی بروزرسانی خودکار محصولات WooCommerce فعال شد (روزی یکبار در ساعت 3 صبح)")
 
 
-async def refresh_product_cache(force=False):
+async def refresh_product_cache(force=False) -> bool:
     """
     بروزرسانی کش محصولات WooCommerce.
 
@@ -160,7 +160,7 @@ async def refresh_product_cache(force=False):
             logger.info(
                 f"دانلود محصولات از WooCommerce API با موفقیت انجام شد. تعداد محصولات: {len(products)}")
 
-            # ذخیره در دیتابیس با روش جدید چند بخشی
+            # ذخیره در دیتابیس
             try:
                 logger.info("در حال ذخیره محصولات دانلود شده در دیتابیس...")
                 success = await save_woocommerce_cache(products, last_cache_update)
@@ -185,10 +185,10 @@ async def refresh_product_cache(force=False):
 
 async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
     """
-    دریافت محصولات از دسته‌بندی‌های مشخص شده از WooCommerce API.
+    دریافت تمام محصولات از WooCommerce API و فیلتر کردن محصولات نامرتبط و بدون عکس.
 
     Returns:
-        list: لیست محصولات
+        list: لیست محصولات فیلتر شده
     """
     try:
         logger.info("شروع دانلود محصولات از WooCommerce API...")
@@ -276,6 +276,10 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
         # پیش‌پردازش محصولات
         processed_products = []
         for product in all_products:
+            # فیلتر کردن محصولات نامرتبط
+            if is_unrelated_product(product):
+                continue
+
             # افزودن فیلد نوع فریم
             product["frame_type"] = get_frame_type(product)
 
@@ -284,7 +288,9 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
 
             # فیلتر کردن عدسی‌ها و پکیج عدسی
             if is_eyeglass_frame(product) and not is_lens_or_lens_package(product):
-                processed_products.append(product)
+                # فیلتر کردن محصولات بدون عکس
+                if product.get("images"):
+                    processed_products.append(product)
 
         eyeglass_count = len(processed_products)
         logger.info(
@@ -340,7 +346,7 @@ def is_lens_or_lens_package(product: Dict[str, Any]) -> bool:
 
 async def get_all_products() -> List[Dict[str, Any]]:
     """
-    دریافت تمام محصولات از کش.
+    دریافت تمام محصولات از کش. اگر کش منقضی شده باشد، آن را بروزرسانی می‌کند.
 
     Returns:
         list: لیست محصولات
@@ -762,6 +768,36 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
             "success": False,
             "message": f"خطا در تطبیق فریم: {str(e)}"
         }
+
+
+def is_unrelated_product(product: Dict[str, Any]) -> bool:
+    """
+    بررسی اینکه آیا محصول نامرتبط است (مانند "شارژ کیف پول" یا "ماوتفاوت محصول").
+
+    Args:
+        product: محصول WooCommerce
+
+    Returns:
+        bool: True اگر محصول نامرتبط باشد
+    """
+    # کلمات کلیدی برای فیلتر کردن محصولات نامرتبط
+    unrelated_keywords = ["شارژ کیف پول", "ماوتفاوت محصول"]
+
+    # بررسی نام محصول
+    name = product.get("name", "").lower()
+    for keyword in unrelated_keywords:
+        if keyword.lower() in name:
+            return True
+
+    # بررسی دسته‌بندی‌ها
+    categories = product.get("categories", [])
+    for category in categories:
+        category_name = category.get("name", "").lower()
+        for keyword in unrelated_keywords:
+            if keyword.lower() in category_name:
+                return True
+
+    return False
 
 
 async def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
