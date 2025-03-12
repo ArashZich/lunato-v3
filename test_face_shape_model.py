@@ -66,9 +66,9 @@ class FaceShapeTester:
             self.model = joblib.load(model_path)
             self.scaler = joblib.load(scaler_path)
             logger.info(
-                f"مدل و اسکیلر با موفقیت از {model_path} و {scaler_path} بارگیری شدند")
+                f"Model and scaler successfully loaded from {model_path} and {scaler_path}")
         except Exception as e:
-            logger.error(f"خطا در بارگیری مدل یا اسکیلر: {str(e)}")
+            logger.error(f"Error loading model or scaler: {str(e)}")
             raise
 
     def _calculate_distance(self, p1, p2):
@@ -97,6 +97,21 @@ class FaceShapeTester:
                 scale = max_dim / max(height, width)
                 img = cv2.resize(
                     img, (int(width * scale), int(height * scale)))
+
+            # بهبود کنتراست تصویر
+            try:
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+                # تبدیل به لیست تا بتوانیم ویرایش کنیم
+                lab_planes = list(cv2.split(lab))  # اصلاح این خط
+                lab_planes[0] = clahe.apply(lab_planes[0])
+                lab = cv2.merge(lab_planes)
+                img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+                # کاهش نویز
+                img = cv2.GaussianBlur(img, (3, 3), 0)
+            except Exception as e:
+                logger.warning(f"خطا در پیش‌پردازش تصویر: {str(e)}")
 
             # تبدیل به RGB
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -131,11 +146,24 @@ class FaceShapeTester:
                 forehead_width = self._calculate_distance(
                     face_landmarks[10], face_landmarks[338])
 
-                # 2. عرض گونه‌ها
-                left_cheek = np.mean([face_landmarks[i]
-                                     for i in self.LEFT_CHEEK], axis=0)
-                right_cheek = np.mean([face_landmarks[i]
-                                      for i in self.RIGHT_CHEEK], axis=0)
+                # عرض گونه‌ها - با بررسی وجود نقاط
+                left_cheek_points = []
+                for i in self.LEFT_CHEEK:
+                    if i in face_landmarks:
+                        left_cheek_points.append(face_landmarks[i])
+
+                right_cheek_points = []
+                for i in self.RIGHT_CHEEK:
+                    if i in face_landmarks:
+                        right_cheek_points.append(face_landmarks[i])
+
+                if not left_cheek_points or not right_cheek_points:
+                    logger.warning(
+                        "نقاط کافی برای محاسبه عرض گونه‌ها وجود ندارد")
+                    return None, None
+
+                left_cheek = np.mean(left_cheek_points, axis=0)
+                right_cheek = np.mean(right_cheek_points, axis=0)
                 cheekbone_width = self._calculate_distance(
                     left_cheek, right_cheek)
 
@@ -144,8 +172,16 @@ class FaceShapeTester:
                     face_landmarks[58], face_landmarks[288])
 
                 # 4. طول صورت
-                face_top = np.mean([face_landmarks[i]
-                                   for i in self.FACE_TOP], axis=0)
+                face_top_points = []
+                for i in self.FACE_TOP:
+                    if i in face_landmarks:
+                        face_top_points.append(face_landmarks[i])
+
+                if not face_top_points:
+                    logger.warning("نقاط کافی برای محاسبه طول صورت وجود ندارد")
+                    return None, None
+                face_top = np.mean(face_top_points, axis=0)
+
                 face_bottom = face_landmarks[152]  # چانه
                 face_length = self._calculate_distance(face_top, face_bottom)
 
@@ -169,18 +205,41 @@ class FaceShapeTester:
                 forehead_to_cheekbone_ratio = forehead_width / \
                     cheekbone_width if cheekbone_width > 0 else 0
 
-                # ویژگی‌های اضافی
+                # ویژگی‌های اضافی - اصلی
                 face_shape_ratio = width_to_length_ratio
                 face_taper_ratio = jaw_width / forehead_width if forehead_width > 0 else 0
+
+                # ویژگی‌های اضافی - جدید
+                # نسبت طول به عرض صورت
+                face_height_to_width_ratio = face_length / \
+                    cheekbone_width if cheekbone_width > 0 else 0
+                # نسبت فک به پیشانی
+                jaw_to_forehead_ratio = jaw_width / forehead_width if forehead_width > 0 else 0
+                # برجستگی چانه
+                chin_prominence = self._calculate_distance(
+                    face_landmarks[152], face_landmarks[8]) / face_length if face_length > 0 else 0
+                # فاصله چشم‌ها به عرض صورت
+                eye_distance = self._calculate_distance(
+                    face_landmarks[33], face_landmarks[263]) / cheekbone_width if cheekbone_width > 0 else 0
+                # نسبت عرض پایین صورت به بالای صورت
+                bottom_to_top_width_ratio = jaw_width / \
+                    forehead_width if forehead_width > 0 else 0
+                # زاویه نرمالایز شده
+                normalized_jaw_angle = jaw_angle / 180.0
 
                 # ساخت بردار ویژگی
                 features = np.array([
                     width_to_length_ratio,
                     cheekbone_to_jaw_ratio,
                     forehead_to_cheekbone_ratio,
-                    jaw_angle,
+                    normalized_jaw_angle,
                     face_shape_ratio,
-                    face_taper_ratio
+                    face_taper_ratio,
+                    face_height_to_width_ratio,  # ویژگی جدید
+                    jaw_to_forehead_ratio,       # ویژگی جدید
+                    chin_prominence,             # ویژگی جدید
+                    eye_distance,                # ویژگی جدید
+                    bottom_to_top_width_ratio    # ویژگی جدید
                 ]).reshape(1, -1)
 
                 # نمایش نقاط کلیدی روی تصویر
@@ -272,11 +331,14 @@ class FaceShapeTester:
         # افزودن متن ویژگی‌ها
         feature_names = [
             "Width/Length", "Cheekbone/Jaw", "Forehead/Cheekbone",
-            "Jaw Angle", "Face Shape Ratio", "Face Taper"
+            "Normalized Jaw Angle", "Face Shape Ratio", "Face Taper",
+            "Height/Width Ratio", "Jaw/Forehead", "Chin Prominence",
+            "Eye Distance", "Bottom/Top Width Ratio"
         ]
 
         y_pos = 110
-        for i, feature in enumerate(features[0]):
+        # فقط 6 ویژگی اول را نمایش بده
+        for i, feature in enumerate(features[0][:6]):
             feature_text = f"{feature_names[i]}: {feature:.2f}"
             cv2.putText(result_img, feature_text,
                         (10, y_pos), font, 0.5, (0, 0, 0), 1)
@@ -335,7 +397,7 @@ class FaceShapeTester:
 
             # تست هر تصویر
             logger.info(
-                f"تست {len(selected_files)} تصویر از نوع {true_shape}...")
+                f"Testing {len(selected_files)} images of type {true_shape}...")
 
             for image_file in tqdm(selected_files, desc=f"Testing {true_shape}"):
                 image_path = os.path.join(shape_path, image_file)
@@ -357,7 +419,7 @@ class FaceShapeTester:
                     "file": image_file,
                     "predicted": predicted_shape,
                     "confidence": confidence,
-                    "features": features[0].tolist()
+                    "features": features.tolist()
                 })
 
                 # افزودن به ماتریس درهم‌ریختگی
@@ -382,9 +444,9 @@ class FaceShapeTester:
                 }
 
                 logger.info(
-                    f"دقت برای {true_shape}: {accuracy:.2f}% ({correct}/{len(shape_results)})")
+                    f"Accuracy for {true_shape}: {accuracy:.2f}% ({correct}/{len(shape_results)})")
             else:
-                logger.warning(f"هیچ نتیجه‌ای برای {true_shape} یافت نشد")
+                logger.warning(f"No results found for {true_shape}")
 
         # ذخیره نتایج
         self.save_results(results, confusion_matrix, output_dir)
@@ -426,9 +488,9 @@ class FaceShapeTester:
         # نمایش ماتریس درهم‌ریختگی
         plt.figure(figsize=(10, 8))
         sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues')
-        plt.xlabel('پیش‌بینی شده')
-        plt.ylabel('واقعی')
-        plt.title('ماتریس درهم‌ریختگی شکل چهره')
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.title('Face Shape Confusion Matrix')
         plt.savefig(os.path.join(output_dir, 'confusion_matrix.png'))
 
         # نمایش دقت برای هر دسته
@@ -451,8 +513,8 @@ class FaceShapeTester:
 
         plt.xticks(range(len(all_shapes)), [
                    f"{shape}\n({SHAPE_NAMES.get(shape, '')})" for shape in all_shapes], rotation=45)
-        plt.ylabel('دقت (%)')
-        plt.title('دقت تشخیص برای هر شکل چهره')
+        plt.ylabel('Accuracy (%)')
+        plt.title('Detection Accuracy for Each Face Shape')
         plt.ylim(0, 100)
 
         # افزودن مقدار دقت روی نمودار
@@ -467,19 +529,20 @@ class FaceShapeTester:
 
 def main():
     # پردازش آرگومان‌های خط فرمان
-    parser = argparse.ArgumentParser(description='تست مدل تشخیص شکل چهره')
+    parser = argparse.ArgumentParser(
+        description='Face Shape Classification Model Test')
     parser.add_argument('--test_dir', type=str, default='testing_set',
-                        help='مسیر پوشه تصاویر تست (پیش‌فرض: testing_set)')
+                        help='Path to test images directory (default: testing_set)')
     parser.add_argument('--output_dir', type=str, default='test_results',
-                        help='مسیر پوشه خروجی (پیش‌فرض: test_results)')
+                        help='Path to output directory (default: test_results)')
     parser.add_argument('--single_image', type=str, default=None,
-                        help='مسیر یک تصویر خاص برای تست')
+                        help='Path to a single test image')
     parser.add_argument('--model_path', type=str, default='data/face_shape_model.pkl',
-                        help='مسیر فایل مدل (پیش‌فرض: data/face_shape_model.pkl)')
+                        help='Path to model file (default: data/face_shape_model.pkl)')
     parser.add_argument('--scaler_path', type=str, default='data/face_shape_model_scaler.pkl',
-                        help='مسیر فایل اسکیلر (پیش‌فرض: data/face_shape_model_scaler.pkl)')
+                        help='Path to scaler file (default: data/face_shape_model_scaler.pkl)')
     parser.add_argument('--num_samples', type=int, default=10,
-                        help='تعداد نمونه‌های تست از هر دسته (پیش‌فرض: 10)')
+                        help='Number of test samples per class (default: 10)')
 
     args = parser.parse_args()
 
@@ -492,7 +555,7 @@ def main():
             if os.path.exists(args.single_image):
                 tester.test_single_image(args.single_image, args.output_dir)
             else:
-                logger.error(f"تصویر مورد نظر یافت نشد: {args.single_image}")
+                logger.error(f"Test image not found: {args.single_image}")
 
         # تست دسته‌ای
         else:
@@ -500,10 +563,10 @@ def main():
                 results, confusion_matrix = tester.test_batch(
                     args.test_dir, args.output_dir, args.num_samples)
             else:
-                logger.error(f"پوشه تست یافت نشد: {args.test_dir}")
+                logger.error(f"Test directory not found: {args.test_dir}")
 
     except Exception as e:
-        logger.error(f"خطا در اجرای تست: {str(e)}")
+        logger.error(f"Error in running test: {str(e)}")
 
 
 if __name__ == "__main__":
