@@ -143,3 +143,4 @@ testing_set
 training_set
 test_results
 debug_images
+face_metrics_log.csv

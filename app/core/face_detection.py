@@ -150,13 +150,14 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
                         "source": "mediapipe"
                     }
 
+                    logger.info("چهره با MediaPipe با موفقیت تشخیص داده شد")
                     return {
                         "success": True,
-                        "message": "چهره با Mediapipe با موفقیت تشخیص داده شد",
+                        "message": "چهره با MediaPipe با موفقیت تشخیص داده شد",
                         "face": face_coordinates
                     }
         except Exception as mp_error:
-            logger.warning(f"خطا در تشخیص چهره با Mediapipe: {str(mp_error)}")
+            logger.warning(f"خطا در تشخیص چهره با MediaPipe: {str(mp_error)}")
 
         # 2. استفاده از OpenCV DNN Face Detector
         try:
@@ -166,6 +167,7 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
 
             # بررسی وجود فایل‌های مدل
             if os.path.exists(model_path) and os.path.exists(config_path):
+                logger.info("در حال استفاده از OpenCV DNN برای تشخیص چهره...")
                 net = cv2.dnn.readNetFromTensorflow(model_path, config_path)
 
                 # پیش‌پردازش تصویر برای مدل DNN
@@ -197,6 +199,10 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
                     width = x2 - x
                     height = y2 - y
 
+                    # اطمینان از معتبر بودن مختصات
+                    if width <= 0 or height <= 0:
+                        raise ValueError("مختصات چهره نامعتبر است")
+
                     # محاسبه مرکز چهره
                     center_x = x + width // 2
                     center_y = y + height // 2
@@ -216,15 +222,24 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
                         "source": "dnn"
                     }
 
+                    logger.info("چهره با DNN با موفقیت تشخیص داده شد")
                     return {
                         "success": True,
                         "message": "چهره با DNN با موفقیت تشخیص داده شد",
                         "face": face_coordinates
                     }
+                else:
+                    logger.warning(
+                        "با DNN هیچ چهره‌ای با اطمینان کافی تشخیص داده نشد")
+            else:
+                logger.warning(
+                    "فایل‌های مدل DNN یافت نشدند، استفاده از روش Haar Cascade")
         except Exception as dnn_error:
             logger.warning(f"خطا در تشخیص چهره با DNN: {str(dnn_error)}")
 
         # 3. در نهایت از Haar Cascade استفاده می‌کنیم (روش قبلی)
+        logger.info("در حال استفاده از Haar Cascade برای تشخیص چهره...")
+
         # بارگیری مدل تشخیص چهره
         face_cascade = load_face_detector()
 
@@ -242,23 +257,25 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
         faces = face_cascade.detectMultiScale(
             enhanced_gray,
             scaleFactor=1.05,       # کاهش مقدار برای تشخیص بیشتر
-            minNeighbors=2,         # کاهش مقدار برای تشخیص بیشتر
-            minSize=(20, 20),       # کاهش حداقل اندازه چهره
+            minNeighbors=3,         # کاهش مقدار برای تشخیص بیشتر
+            minSize=(30, 30),       # ابعاد حداقل معقول
             flags=cv2.CASCADE_SCALE_IMAGE
         )
 
         # اگر چهره‌ای تشخیص داده نشد، با پارامترهای سهل‌گیرانه‌تر تلاش کنیم
         if len(faces) == 0:
+            logger.info("تلاش مجدد با پارامترهای سهل‌گیرانه‌تر...")
             faces = face_cascade.detectMultiScale(
                 enhanced_gray,
-                scaleFactor=1.03,
+                scaleFactor=1.01,
                 minNeighbors=1,     # کاهش بیشتر مقدار برای تشخیص بیشتر
-                minSize=(10, 10),   # کاهش بیشتر حداقل اندازه چهره
+                minSize=(20, 20),   # کاهش بیشتر حداقل اندازه چهره
                 flags=cv2.CASCADE_SCALE_IMAGE
             )
 
         # اگر همچنان چهره‌ای تشخیص داده نشد
         if len(faces) == 0:
+            logger.warning("هیچ چهره‌ای در تصویر تشخیص داده نشد")
             return {
                 "success": False,
                 "message": "هیچ چهره‌ای در تصویر تشخیص داده نشد"
@@ -266,15 +283,23 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
 
         # اگر بیش از یک چهره تشخیص داده شد
         if len(faces) > 1:
+            logger.info(
+                f"{len(faces)} چهره تشخیص داده شد. انتخاب بزرگترین چهره...")
             # انتخاب بزرگترین چهره (احتمالاً نزدیک‌ترین چهره)
             largest_face = max(faces, key=lambda f: f[2] * f[3])
-            logger.info(
-                f"چندین چهره تشخیص داده شد ({len(faces)}). بزرگترین چهره انتخاب شد.")
         else:
             largest_face = faces[0]
 
         # استخراج مختصات چهره
         x, y, w, h = largest_face
+
+        # بررسی معتبر بودن ابعاد
+        if w <= 0 or h <= 0:
+            logger.warning("مختصات چهره نامعتبر است")
+            return {
+                "success": False,
+                "message": "مختصات چهره نامعتبر است"
+            }
 
         # محاسبه مرکز چهره
         center_x = x + w // 2
@@ -295,6 +320,7 @@ def detect_face(image: np.ndarray) -> Dict[str, Any]:
             "source": "haarcascade"
         }
 
+        logger.info("چهره با Haar Cascade با موفقیت تشخیص داده شد")
         return {
             "success": True,
             "message": "چهره با موفقیت تشخیص داده شد",
