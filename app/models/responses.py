@@ -5,7 +5,8 @@ from datetime import datetime
 
 class ClientInfo(BaseModel):
     """اطلاعات دستگاه و مرورگر کاربر"""
-    device_type: str = Field(..., description="نوع دستگاه (mobile, tablet, desktop)")
+    device_type: str = Field(...,
+                             description="نوع دستگاه (mobile, tablet, desktop)")
     os_name: Optional[str] = Field(None, description="نام سیستم‌عامل")
     os_version: Optional[str] = Field(None, description="نسخه سیستم‌عامل")
     browser_name: Optional[str] = Field(None, description="نام مرورگر")
@@ -37,24 +38,36 @@ class RecommendedFrame(BaseModel):
     name: str = Field(..., description="نام محصول")
     permalink: str = Field(..., description="لینک محصول")
     price: str = Field(..., description="قیمت محصول")
-    regular_price: Optional[str] = Field(None, description="قیمت عادی محصول (قبل از تخفیف)")
+    regular_price: Optional[str] = Field(
+        None, description="قیمت عادی محصول (قبل از تخفیف)")
     frame_type: str = Field(..., description="نوع/شکل فریم")
+    eyeglass_type: Optional[str] = Field(
+        None, description="نوع عینک (طبی، آفتابی، سایر)")
     images: List[str] = Field(..., description="تصاویر محصول")
     match_score: float = Field(..., description="امتیاز تطابق با شکل صورت")
 
 
 class FaceAnalysisResponse(BaseResponse):
     """پاسخ تحلیل چهره و پیشنهاد فریم"""
-    face_coordinates: Optional[FaceCoordinates] = Field(None, description="مختصات چهره")
-    face_shape: Optional[str] = Field(None, description="شکل تشخیص داده شده چهره")
-    confidence: Optional[float] = Field(None, description="میزان اطمینان تشخیص")
-    description: Optional[str] = Field(None, description="توضیحات مربوط به شکل چهره")
-    recommendation: Optional[str] = Field(None, description="توصیه‌های مربوط به فریم مناسب")
-    client_info: Optional[ClientInfo] = Field(None, description="اطلاعات دستگاه و مرورگر کاربر")
-    recommended_frame_types: Optional[List[str]] = Field(None, description="انواع فریم‌های پیشنهادی")
-    recommended_frames: Optional[List[RecommendedFrame]] = Field(None, description="فریم‌های پیشنهادی")
-    task_id: Optional[str] = Field(None, description="شناسه وظیفه در صورت پردازش غیرهمزمان")
-    
+    face_coordinates: Optional[FaceCoordinates] = Field(
+        None, description="مختصات چهره")
+    face_shape: Optional[str] = Field(
+        None, description="شکل تشخیص داده شده چهره")
+    confidence: Optional[float] = Field(
+        None, description="میزان اطمینان تشخیص")
+    description: Optional[str] = Field(
+        None, description="توضیحات مربوط به شکل چهره")
+    recommendation: Optional[str] = Field(
+        None, description="توصیه‌های مربوط به فریم مناسب")
+    client_info: Optional[ClientInfo] = Field(
+        None, description="اطلاعات دستگاه و مرورگر کاربر")
+    recommended_frame_types: Optional[List[str]] = Field(
+        None, description="انواع فریم‌های پیشنهادی")
+    recommended_frames: Optional[List[RecommendedFrame]] = Field(
+        None, description="فریم‌های پیشنهادی")
+    task_id: Optional[str] = Field(
+        None, description="شناسه وظیفه در صورت پردازش غیرهمزمان")
+
     class Config:
         schema_extra = {
             "example": {
@@ -101,10 +114,13 @@ class FaceAnalysisResponse(BaseResponse):
 
 class FrameRecommendationResponse(BaseResponse):
     """پاسخ پیشنهاد فریم بر اساس شکل صورت"""
-    face_shape: str = Field(..., description="شکل صورت مورد استفاده برای پیشنهادات")
-    recommended_frame_types: List[str] = Field(..., description="انواع فریم‌های پیشنهادی")
-    recommended_frames: List[RecommendedFrame] = Field(..., description="فریم‌های پیشنهادی")
-    
+    face_shape: str = Field(...,
+                            description="شکل صورت مورد استفاده برای پیشنهادات")
+    recommended_frame_types: List[str] = Field(
+        ..., description="انواع فریم‌های پیشنهادی")
+    recommended_frames: List[RecommendedFrame] = Field(
+        ..., description="فریم‌های پیشنهادی")
+
     class Config:
         schema_extra = {
             "example": {
@@ -133,5 +149,7 @@ class HealthResponse(BaseResponse):
     version: str = Field(..., description="نسخه API")
     environment: str = Field(..., description="محیط اجرا")
     timestamp: datetime = Field(..., description="زمان پاسخ")
-    database_status: Optional[str] = Field(None, description="وضعیت اتصال به دیتابیس")
-    celery_status: Optional[str] = Field(None, description="وضعیت سرویس Celery")
+    database_status: Optional[str] = Field(
+        None, description="وضعیت اتصال به دیتابیس")
+    celery_status: Optional[str] = Field(
+        None, description="وضعیت سرویس Celery")
