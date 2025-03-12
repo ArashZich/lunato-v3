@@ -59,7 +59,7 @@ def analyze_face_shape(image: np.ndarray, face_coordinates: Dict[str, int]) -> D
         if face_length > 0 and cheekbone_width > 0 and jawline_width > 0:
             width_to_length_ratio = cheekbone_width / face_length
 
-            # محدود کردن نسبت عرض به طول
+            # محدود کردن نسبت عرض به طول به مقادیر منطقی
             if width_to_length_ratio < 0.65:
                 width_to_length_ratio = 0.65
                 logger.warning(
@@ -69,7 +69,7 @@ def analyze_face_shape(image: np.ndarray, face_coordinates: Dict[str, int]) -> D
                 logger.warning(
                     f"نسبت عرض به طول ({width_to_length_ratio:.2f}) خیلی بزرگ است - اصلاح شد")
 
-            # اگر نسبت گونه به فک خیلی بزرگ است، ممکن است اشتباه باشد
+            # بررسی و اصلاح نسبت گونه به فک
             if jawline_width < cheekbone_width * 0.3:  # فک خیلی باریک تشخیص داده شده
                 logger.warning(
                     "تشخیص فک خیلی باریک - محدود کردن نسبت گونه به فک")
@@ -82,7 +82,7 @@ def analyze_face_shape(image: np.ndarray, face_coordinates: Dict[str, int]) -> D
             else:
                 cheekbone_to_jaw_ratio = cheekbone_width / jawline_width
 
-            # محدود کردن نسبت گونه به فک
+            # محدود کردن نسبت گونه به فک به مقادیر منطقی
             if cheekbone_to_jaw_ratio > 2.3:
                 cheekbone_to_jaw_ratio = 2.3
                 logger.warning(
@@ -94,7 +94,7 @@ def analyze_face_shape(image: np.ndarray, face_coordinates: Dict[str, int]) -> D
 
             forehead_to_cheekbone_ratio = forehead_width / cheekbone_width
 
-            # محدود کردن نسبت پیشانی به گونه
+            # محدود کردن نسبت پیشانی به گونه به مقادیر منطقی
             if forehead_to_cheekbone_ratio > 1.2:
                 forehead_to_cheekbone_ratio = 1.2
                 logger.warning(
@@ -114,6 +114,7 @@ def analyze_face_shape(image: np.ndarray, face_coordinates: Dict[str, int]) -> D
             logger.info(f"نسبت گونه به فک: {cheekbone_to_jaw_ratio}")
             logger.info(f"نسبت پیشانی به گونه: {forehead_to_cheekbone_ratio}")
         else:
+            # مقادیر پیش‌فرض در صورت عدم موفقیت محاسبات
             width_to_length_ratio = 0.8
             cheekbone_to_jaw_ratio = 1.2
             forehead_to_cheekbone_ratio = 0.7
@@ -145,11 +146,13 @@ def analyze_face_shape(image: np.ndarray, face_coordinates: Dict[str, int]) -> D
 
         logger.info(f"نسبت‌های محاسبه شده: {shape_metrics}")
 
-        # ثبت نسبت‌های چهره در فایل لاگ برای تحلیل آماری
-        log_face_metrics(shape_metrics)
-
         # تعیین شکل چهره
         face_shape = _determine_face_shape(shape_metrics)
+
+        # ثبت لاگ با شکل چهره تشخیص داده شده
+        log_face_metrics(shape_metrics, face_shape)
+
+        # محاسبه میزان اطمینان
         confidence = _calculate_confidence(shape_metrics, face_shape)
 
         # دریافت توضیحات و توصیه‌ها
@@ -280,7 +283,11 @@ def generate_full_analysis(image: np.ndarray, face_coordinates: Dict[str, int]) 
     try:
         logger.info("شروع تحلیل کامل شکل چهره...")
 
-        # ابتدا تلاش برای استفاده از مدل ML
+        # 1. استفاده از روش هندسی (قابل اعتمادتر)
+        geometric_result = analyze_face_shape(image, face_coordinates)
+        geometric_success = geometric_result.get("success", False)
+
+        # 2. تلاش برای استفاده از مدل ML (به عنوان کمکی)
         ml_success = False
         ml_face_shape = None
         ml_confidence = 0
@@ -294,72 +301,28 @@ def generate_full_analysis(image: np.ndarray, face_coordinates: Dict[str, int]) 
         except Exception as model_error:
             logger.warning(f"خطا در استفاده از مدل ML: {str(model_error)}")
 
-        # استفاده از روش هندسی
-        geometric_result = analyze_face_shape(image, face_coordinates)
-        geometric_success = geometric_result.get("success", False)
+        # تصمیم‌گیری نهایی - اولویت با روش هندسی
+        if geometric_success:
+            # استفاده از روش هندسی که قابل اعتمادتر است
+            result_face_shape = geometric_result.get("face_shape")
+            result_confidence = geometric_result.get("confidence")
 
-        # تصمیم‌گیری نهایی با استفاده از وزن‌دهی هوشمند
-        if ml_success and geometric_success:
-            # هر دو روش موفق بوده‌اند - ترکیب نتایج
-            ml_shape = ml_face_shape
-            geo_shape = geometric_result.get("face_shape")
-            ml_conf = ml_confidence
-            geo_conf = geometric_result.get("confidence", 0)
-
-            logger.info(
-                f"نتایج هر دو روش: ML: {ml_shape} ({ml_conf:.1f}%), هندسی: {geo_shape} ({geo_conf:.1f}%)")
-
-            # اگر هر دو روش نتیجه یکسانی دارند، اطمینان بیشتری داریم
-            if ml_shape == geo_shape:
-                result_face_shape = ml_shape
-                # میانگین وزن‌دار اطمینان‌ها
-                result_confidence = (ml_conf * 0.6 + geo_conf * 0.4)
+            # اگر مدل ML هم موفق بوده و شکل یکسانی تشخیص داده، اطمینان بیشتر
+            if ml_success and ml_face_shape == result_face_shape:
+                # میانگین وزن‌دار با اولویت بیشتر به روش هندسی
+                result_confidence = (result_confidence *
+                                     0.7) + (ml_confidence * 0.3)
                 logger.info(
                     f"هر دو روش نتیجه یکسان دارند: {result_face_shape} با اطمینان ترکیبی {result_confidence:.1f}%")
             else:
-                # نتایج متفاوت - تصمیم‌گیری بر اساس اولویت‌ها و میزان اطمینان
-
-                # وزن‌های پایه برای هر روش
-                ml_weight = 0.6
-                geo_weight = 0.4
-
-                # تعدیل وزن‌ها برای شکل‌های خاص
-                if ml_shape == "HEART" or ml_shape == "OBLONG":
-                    # مدل ML در تشخیص این شکل‌ها خوب است
-                    ml_weight += 0.1
-                    geo_weight -= 0.1
-                elif geo_shape == "SQUARE" or geo_shape == "ROUND":
-                    # روش هندسی در تشخیص این شکل‌ها خوب است
-                    ml_weight -= 0.1
-                    geo_weight += 0.1
-
-                # اعمال وزن‌ها به اطمینان‌ها
-                ml_weighted = ml_conf * ml_weight
-                geo_weighted = geo_conf * geo_weight
-
-                # انتخاب شکل چهره با بیشترین امتیاز
-                if ml_weighted > geo_weighted:
-                    result_face_shape = ml_shape
-                    result_confidence = ml_conf * 0.9  # کاهش کمی اطمینان به دلیل اختلاف
-                    logger.info(
-                        f"انتخاب نتیجه ML: {result_face_shape} با اطمینان {result_confidence:.1f}%")
-                else:
-                    result_face_shape = geo_shape
-                    result_confidence = geo_conf * 0.9  # کاهش کمی اطمینان به دلیل اختلاف
-                    logger.info(
-                        f"انتخاب نتیجه هندسی: {result_face_shape} با اطمینان {result_confidence:.1f}%")
+                logger.info(
+                    f"استفاده از نتایج تحلیل هندسی: {result_face_shape} با اطمینان {result_confidence:.1f}%")
         elif ml_success:
-            # فقط مدل ML موفق بوده
+            # استفاده از نتایج مدل ML در صورتی که تحلیل هندسی موفق نبوده است
             result_face_shape = ml_face_shape
             result_confidence = ml_confidence
             logger.info(
-                f"استفاده از نتیجه ML: {result_face_shape} با اطمینان {result_confidence:.1f}%")
-        elif geometric_success:
-            # فقط روش هندسی موفق بوده
-            result_face_shape = geometric_result.get("face_shape")
-            result_confidence = geometric_result.get("confidence")
-            logger.info(
-                f"استفاده از نتیجه هندسی: {result_face_shape} با اطمینان {result_confidence:.1f}%")
+                f"استفاده از نتایج مدل ML: {result_face_shape} با اطمینان {result_confidence:.1f}%")
         else:
             # هر دو روش شکست خورده‌اند
             return {
@@ -425,24 +388,18 @@ def _determine_face_shape(metrics: Dict[str, float]) -> str:
 
     # لاگ کردن مقادیر محاسبه شده برای اشکال‌زدایی
     logger.info(f"نسبت‌های محاسبه شده برای تشخیص شکل چهره:")
-    logger.info(f"نسبت عرض به طول: {width_to_length}")
-    logger.info(f"نسبت گونه به فک: {cheekbone_to_jaw}")
-    logger.info(f"نسبت پیشانی به گونه: {forehead_to_cheekbone}")
-    logger.info(f"زاویه فک: {jaw_angle} درجه")
+    logger.info(f"نسبت عرض به طول: {width_to_length:.2f}")
+    logger.info(f"نسبت گونه به فک: {cheekbone_to_jaw:.2f}")
+    logger.info(f"نسبت پیشانی به گونه: {forehead_to_cheekbone:.2f}")
+    logger.info(f"زاویه فک: {jaw_angle:.2f} درجه")
 
-    # قوانین بهینه‌شده برای ۵ شکل چهره
+    # قوانین اصلاح شده برای تشخیص بهتر شکل چهره
 
     # صورت قلبی (HEART)
     # ویژگی اصلی: پیشانی پهن و فک باریک، نسبت گونه به فک بزرگ
-    if cheekbone_to_jaw > 1.4 and (forehead_to_cheekbone > 0.8 or width_to_length < 0.8):
+    if cheekbone_to_jaw > 1.35 and (forehead_to_cheekbone > 0.75 or width_to_length < 0.85):
         logger.info("تشخیص شکل چهره: HEART (قلبی)")
         return "HEART"
-
-    # صورت کشیده (OBLONG)
-    # ویژگی اصلی: طول زیاد نسبت به عرض
-    if width_to_length < 0.75 and cheekbone_to_jaw < 1.3:
-        logger.info("تشخیص شکل چهره: OBLONG (کشیده)")
-        return "OBLONG"
 
     # صورت گرد (ROUND)
     # ویژگی اصلی: نسبت عرض به طول نزدیک به 1، زاویه فک بزرگ
@@ -456,35 +413,40 @@ def _determine_face_shape(metrics: Dict[str, float]) -> str:
         logger.info("تشخیص شکل چهره: SQUARE (مربعی)")
         return "SQUARE"
 
-    # افزایش دقت برای تشخیص متعادل‌تر
+    # صورت کشیده (OBLONG)
+    # ویژگی اصلی: طول زیاد نسبت به عرض
+    if width_to_length < 0.75 and cheekbone_to_jaw < 1.35:
+        logger.info("تشخیص شکل چهره: OBLONG (کشیده)")
+        return "OBLONG"
 
-    # بررسی مجدد برای HEART با شرایط سخت‌گیرانه‌تر
+    # افزایش دقت برای تشخیص متعادل‌تر - تست دوباره با شرایط کمتر سختگیرانه
+
+    # بررسی مجدد برای HEART
     if cheekbone_to_jaw > 1.3 and forehead_to_cheekbone > 0.7:
         logger.info("تشخیص شکل چهره (شرایط ثانویه): HEART (قلبی)")
         return "HEART"
 
-    # بررسی مجدد برای ROUND با شرایط سخت‌گیرانه‌تر
-    if width_to_length > 0.82 and width_to_length < 0.95 and jaw_angle > 140:
+    # بررسی مجدد برای ROUND
+    if width_to_length > 0.82 and jaw_angle > 140:
         logger.info("تشخیص شکل چهره (شرایط ثانویه): ROUND (گرد)")
         return "ROUND"
 
-    # بررسی مجدد برای SQUARE با شرایط سخت‌گیرانه‌تر
-    if width_to_length > 0.78 and cheekbone_to_jaw < 1.3 and jaw_angle < 150:
-        if forehead_to_cheekbone > 0.7 and forehead_to_cheekbone < 1.1:
-            logger.info("تشخیص شکل چهره (شرایط ثانویه): SQUARE (مربعی)")
-            return "SQUARE"
+    # بررسی مجدد برای SQUARE
+    if width_to_length > 0.78 and cheekbone_to_jaw < 1.25 and jaw_angle < 150:
+        logger.info("تشخیص شکل چهره (شرایط ثانویه): SQUARE (مربعی)")
+        return "SQUARE"
 
-    # بررسی مجدد برای OBLONG با شرایط سخت‌گیرانه‌تر
-    if width_to_length < 0.8 and jaw_angle > 140:
+    # بررسی مجدد برای OBLONG با شرایط کمتر سختگیرانه
+    if width_to_length < 0.8 and cheekbone_to_jaw < 1.4:
         logger.info("تشخیص شکل چهره (شرایط ثانویه): OBLONG (کشیده)")
         return "OBLONG"
 
-    # صورت بیضی (OVAL) - باید شرایط خاص‌تری داشته باشد، نه فقط پیش‌فرض
+    # صورت بیضی (OVAL) - شکل متعادل
     if 0.75 <= width_to_length <= 0.85 and 1.1 <= cheekbone_to_jaw <= 1.4:
         logger.info("تشخیص شکل چهره: OVAL (بیضی)")
         return "OVAL"
 
-    # اگر هیچ یک از شرایط بالا برقرار نباشد، به طور پیش‌فرض بیضی در نظر می‌گیریم
+    # پیش‌فرض به عنوان بیضی
     logger.info("تشخیص شکل چهره: OVAL (بیضی) - پیش‌فرض")
     return "OVAL"
 
