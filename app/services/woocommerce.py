@@ -676,8 +676,8 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
             "match_score", 0), reverse=True)
 
         # محاسبه تعداد فریم‌ها از هر دسته براساس توزیع تعیین شده
-        eyeglasses_count = int(limit * 0.3)  # 30% عینک طبی
-        sunglasses_count = int(limit * 0.6)  # 60% عینک آفتابی
+        eyeglasses_count = int(limit * 0.4)  # 40% عینک طبی
+        sunglasses_count = int(limit * 0.5)  # 50% عینک آفتابی
         other_count = limit - eyeglasses_count - sunglasses_count  # 10% سایر
 
         # تنظیم تعداد در صورت کمبود داده در هر دسته
@@ -706,17 +706,56 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
                 eyeglasses_count = len(eyeglasses_frames)
                 sunglasses_count += shortfall
 
-        # انتخاب فریم‌ها با تعداد مشخص شده از هر دسته
-        selected_eyeglasses = eyeglasses_frames[:eyeglasses_count]
-        selected_sunglasses = sunglasses_frames[:sunglasses_count]
-        selected_others = other_frames[:other_count]
+        # تقسیم هر دسته به دو بخش: با امتیاز بالا و انتخاب تصادفی
+        # برای هر دسته، 60% از محصولات بر اساس امتیاز و 40% به صورت تصادفی انتخاب می‌شوند
+        def select_diverse_frames(frames, count):
+            if not frames or count <= 0:
+                return []
+
+            # تعداد فریم‌های با امتیاز بالا
+            top_count = int(count * 0.6)
+            if top_count == 0:
+                top_count = 1
+
+            # تعداد فریم‌های تصادفی
+            random_count = count - top_count
+
+            # انتخاب فریم‌های با امتیاز بالا
+            top_frames = frames[:top_count]
+
+            # انتخاب فریم‌های تصادفی از بقیه
+            remaining_frames = frames[top_count:] if len(
+                frames) > top_count else []
+
+            if remaining_frames and random_count > 0:
+                import random
+                # انتخاب تصادفی از فریم‌های باقیمانده (بدون تکرار)
+                random_frames = random.sample(remaining_frames, min(
+                    random_count, len(remaining_frames)))
+            else:
+                random_frames = []
+
+            # ترکیب دو دسته
+            selected = top_frames + random_frames
+
+            # برهم زدن ترتیب نتایج برای تنوع بیشتر
+            random.shuffle(selected)
+
+            return selected
+
+        # انتخاب فریم‌ها با روش متنوع
+        selected_eyeglasses = select_diverse_frames(
+            eyeglasses_frames, eyeglasses_count)
+        selected_sunglasses = select_diverse_frames(
+            sunglasses_frames, sunglasses_count)
+        selected_others = select_diverse_frames(other_frames, other_count)
 
         # ترکیب فریم‌های انتخاب شده
         selected_frames = selected_eyeglasses + selected_sunglasses + selected_others
 
-        # مرتب‌سازی نهایی بر اساس امتیاز تطابق
-        selected_frames = sorted(selected_frames, key=lambda x: x.get(
-            "match_score", 0), reverse=True)
+        # ایجاد تنوع در نتایج نهایی با جابجایی تصادفی
+        import random
+        random.shuffle(selected_frames)
 
         # تبدیل به فرمت پاسخ مورد نظر
         recommended_frames = []
@@ -747,7 +786,7 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
             })
 
         logger.info(
-            f"پیشنهاد فریم کامل شد: {len(recommended_frames)} توصیه (طبی: {eyeglasses_count}, آفتابی: {sunglasses_count}, سایر: {other_count})")
+            f"پیشنهاد فریم کامل شد: {len(recommended_frames)} توصیه (طبی: {len(selected_eyeglasses)}, آفتابی: {len(selected_sunglasses)}, سایر: {len(selected_others)})")
 
         return {
             "success": True,
@@ -756,9 +795,9 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
             "recommended_frames": recommended_frames,
             "total_matches": len(recommended_frames),
             "distribution": {
-                "eyeglasses": eyeglasses_count,
-                "sunglasses": sunglasses_count,
-                "others": other_count
+                "eyeglasses": len(selected_eyeglasses),
+                "sunglasses": len(selected_sunglasses),
+                "others": len(selected_others)
             }
         }
 
