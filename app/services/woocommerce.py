@@ -105,7 +105,7 @@ def start_scheduled_updates():
     update_scheduler.start()
 
     logger.info(
-        "زمان‌بندی بروزرسانی خودکار محصولات WooCommerce فعال شد (روزی یکبار در ساعت 3 صبح)")
+        "زمان‌بندی بروزرسانی خودکار محصولات WooCommerce فعال شد (دوشنبه ها و پنجشنبه ها)")
 
 
 async def refresh_product_cache(force=False) -> bool:
