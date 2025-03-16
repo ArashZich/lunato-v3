@@ -2,7 +2,7 @@ import logging
 import json
 import aiohttp
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import asyncio
 import threading
 import time
@@ -44,34 +44,33 @@ async def initialize_product_cache():
         db = get_database()
         cache_record = await db.woocommerce_cache.find_one({"type": "products_cache"})
 
-        if cache_record and "last_update" in cache_record:
-            # بررسی تازگی کش
-            last_update = cache_record["last_update"]
-            if (datetime.utcnow() - last_update) < timedelta(hours=24):
-                logger.info(
-                    f"استفاده از کش موجود در دیتابیس (بروزرسانی آخر: {last_update})")
-                product_cache = cache_record["data"]
-                last_cache_update = last_update
-                update_status["last_update"] = last_update
-                update_status["total_products"] = len(
-                    product_cache) if product_cache else 0
+        if cache_record and "data" in cache_record and cache_record["data"]:
+            # استفاده از کش موجود در دیتابیس بدون توجه به زمان آخرین به‌روزرسانی
+            logger.info(
+                f"کش محصولات در دیتابیس یافت شد (بروزرسانی آخر: {cache_record['last_update']})")
+            logger.info(
+                f"استفاده از {len(cache_record['data'])} محصول موجود در کش")
 
-                # راه‌اندازی بروزرسانی خودکار
-                start_scheduled_updates()
-                return
-            else:
-                logger.info(
-                    "کش محصولات در دیتابیس منقضی شده است. نیاز به بروزرسانی دارد.")
+            product_cache = cache_record["data"]
+            last_cache_update = cache_record["last_update"]
+            update_status["last_update"] = cache_record["last_update"]
+            update_status["total_products"] = len(
+                product_cache) if product_cache else 0
+
+            # فقط راه‌اندازی زمان‌بندی بدون دانلود اولیه
+            start_scheduled_updates()
+            return
         else:
             logger.info(
-                "کش محصولات در دیتابیس یافت نشد. در حال دانلود محصولات از WooCommerce...")
+                "کش محصولات در دیتابیس یافت نشد یا خالی است. انجام دانلود اولیه محصولات از WooCommerce...")
     except Exception as e:
         logger.warning(f"خطا در بررسی کش دیتابیس: {str(e)}")
+        logger.info("به دلیل خطا در بررسی کش، انجام دانلود اولیه محصولات...")
 
-    # بروزرسانی اولیه
+    # بروزرسانی اولیه فقط اگر کش وجود نداشته باشد یا خالی باشد
     await refresh_product_cache(force=True)
 
-    # راه‌اندازی بروزرسانی خودکار
+    # راه‌اندازی بروزرسانی خودکار هفتگی
     start_scheduled_updates()
 
 
@@ -122,19 +121,17 @@ async def refresh_product_cache(force=False) -> bool:
     global product_cache, last_cache_update, update_status
 
     # بررسی وضعیت فعلی کش
-    if not force and product_cache is not None and last_cache_update is not None:
-        # اگر کمتر از 24 ساعت از آخرین بروزرسانی گذشته باشد، نیازی به بروزرسانی نیست
-        if datetime.utcnow() - last_cache_update < timedelta(hours=24):
-            logger.info(
-                "کش محصولات WooCommerce معتبر است و نیاز به بروزرسانی ندارد")
-            return True
+    if not force and product_cache is not None and len(product_cache) > 0:
+        logger.info(
+            "کش محصولات WooCommerce از قبل معتبر است و نیاز به بروزرسانی ندارد")
+        return True
 
     # از قفل برای جلوگیری از بروزرسانی‌های همزمان استفاده می‌کنیم
     async with refresh_lock:
         # بررسی مجدد پس از گرفتن قفل
-        if not force and product_cache is not None and last_cache_update is not None:
-            if datetime.utcnow() - last_cache_update < timedelta(hours=24):
-                return True
+        if not force and product_cache is not None and len(product_cache) > 0:
+            logger.info("کش محصولات از قبل معتبر است (بررسی مجدد پس از قفل)")
+            return True
 
         # تنظیم وضعیت بروزرسانی
         update_status["in_progress"] = True
@@ -155,7 +152,7 @@ async def refresh_product_cache(force=False) -> bool:
 
             # بروزرسانی کش
             product_cache = products
-            last_cache_update = datetime.utcnow()
+            last_cache_update = datetime.now(timezone.utc)
             update_status["last_update"] = last_cache_update
             update_status["total_products"] = len(products)
 
@@ -360,7 +357,7 @@ async def get_all_products() -> List[Dict[str, Any]]:
         await initialize_product_cache()
 
     # اگر کش قدیمی است (بیش از 24 ساعت)، بروزرسانی در پس‌زمینه
-    if last_cache_update is None or datetime.utcnow() - last_cache_update > timedelta(hours=24):
+    if last_cache_update is None or datetime.now(timezone.utc) - last_cache_update > timedelta(hours=24):
         # بروزرسانی غیرمنتظر
         asyncio.create_task(refresh_product_cache())
 

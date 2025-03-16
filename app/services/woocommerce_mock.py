@@ -2,7 +2,7 @@
 import logging
 import json
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import asyncio
 import random
 import os
@@ -51,7 +51,7 @@ async def initialize_product_cache():
 
     # ایجاد داده‌های مصنوعی
     mock_product_cache = generate_mock_products(100)
-    last_cache_update = datetime.utcnow()
+    last_cache_update = datetime.now(timezone.utc)
 
     logger.info(f"داده‌های مصنوعی ایجاد شدند: {len(mock_product_cache)} محصول")
 
@@ -233,7 +233,7 @@ async def refresh_product_cache(force=False):
     # بررسی وضعیت فعلی کش
     if not force and mock_product_cache is not None and last_cache_update is not None:
         # اگر کمتر از 1 روز از آخرین بروزرسانی گذشته باشد، نیازی به بروزرسانی نیست
-        if datetime.utcnow() - last_cache_update < timedelta(days=1):
+        if datetime.now(timezone.utc) - last_cache_update < timedelta(days=1):
             logger.info(
                 "کش محصولات مصنوعی معتبر است و نیاز به بروزرسانی ندارد")
             return True
@@ -244,7 +244,7 @@ async def refresh_product_cache(force=False):
 
         # تولید داده‌های مصنوعی جدید
         mock_product_cache = generate_mock_products(100)
-        last_cache_update = datetime.utcnow()
+        last_cache_update = datetime.now(timezone.utc)
 
         logger.info("بروزرسانی کش محصولات مصنوعی با موفقیت انجام شد")
         return True
@@ -268,7 +268,7 @@ async def get_all_products() -> List[Dict[str, Any]]:
         await initialize_product_cache()
 
     # اگر کش قدیمی است (بیش از 1 روز)، آن را بروزرسانی می‌کنیم
-    if last_cache_update is None or datetime.utcnow() - last_cache_update > timedelta(days=1):
+    if last_cache_update is None or datetime.now(timezone.utc) - last_cache_update > timedelta(days=1):
         await refresh_product_cache()
 
     return mock_product_cache

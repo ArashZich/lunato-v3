@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import logging
 
 from app.models.responses import HealthResponse
@@ -17,7 +17,7 @@ router = APIRouter()
 async def health_check(config: settings = Depends(get_settings)):
     """
     بررسی سلامت API.
-    
+
     این API برای بررسی دسترسی‌پذیری و درستی کارکرد سیستم استفاده می‌شود.
     همچنین اطلاعات مربوط به نسخه و محیط اجرا را برمی‌گرداند.
     """
@@ -29,7 +29,7 @@ async def health_check(config: settings = Depends(get_settings)):
     except Exception as e:
         logger.error(f"خطا در اتصال به دیتابیس: {str(e)}")
         db_status = "خطای اتصال"
-    
+
     # بررسی اتصال به Celery
     try:
         from app.celery_app import app as celery_app
@@ -37,13 +37,13 @@ async def health_check(config: settings = Depends(get_settings)):
     except Exception as e:
         logger.error(f"خطا در اتصال به Celery: {str(e)}")
         celery_status = "خطای اتصال"
-    
+
     return HealthResponse(
         success=True,
         message="سیستم تشخیص چهره و پیشنهاد فریم عینک به درستی کار می‌کند",
         version="1.0.0",
         environment=config.ENVIRONMENT,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         database_status=db_status,
         celery_status=celery_status
     )
