@@ -87,7 +87,9 @@ def start_scheduled_updates():
 
     # تنظیم زمان‌بندی بروزرسانی (روزی یکبار در ساعت 3 صبح)
     def run_scheduler():
-        schedule.every().day.at("03:00").do(run_async_update)
+        schedule.every().monday.at("03:00").do(run_async_update)  # دوشنبه‌ها ساعت 3 صبح
+        schedule.every().thursday.at("03:00").do(
+            run_async_update)  # پنجشنبه‌ها ساعت 3 صبح
 
         while True:
             schedule.run_pending()
