@@ -1,16 +1,18 @@
 import logging
 import json
-import aiohttp
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 import asyncio
 import threading
 import time
 import schedule
+import aiohttp
+import random
 
 from app.config import settings
 from app.core.face_shape_data import get_recommended_frame_types
 from app.db.connection import get_database
+from app.db.repository import save_woocommerce_cache, get_woocommerce_cache
 
 
 # تنظیمات لاگر
@@ -35,31 +37,65 @@ async def initialize_product_cache():
     """
     راه‌اندازی اولیه کش محصولات در شروع برنامه
     """
-    global product_cache, last_cache_update, update_scheduler
+    global product_cache, last_cache_update, update_status
 
     logger.info("شروع راه‌اندازی اولیه کش محصولات WooCommerce")
 
     # بررسی وجود کش در دیتابیس
     try:
         db = get_database()
-        cache_record = await db.woocommerce_cache.find_one({"type": "products_cache"})
+        cache_record = await db.woocommerce_cache.find_one({"type": "products_cache_meta"})
 
-        if cache_record and "data" in cache_record and cache_record["data"]:
-            # استفاده از کش موجود در دیتابیس بدون توجه به زمان آخرین به‌روزرسانی
-            logger.info(
-                f"کش محصولات در دیتابیس یافت شد (بروزرسانی آخر: {cache_record['last_update']})")
-            logger.info(
-                f"استفاده از {len(cache_record['data'])} محصول موجود در کش")
+        if cache_record and "total_products" in cache_record and cache_record["total_products"] > 0:
+            # بررسی اعتبار کش
+            cache_age = datetime.now(timezone.utc) - \
+                cache_record['last_update']
+            if cache_age > timedelta(hours=24):
+                logger.info(
+                    f"کش محصولات در دیتابیس منقضی شده است (آخرین بروزرسانی: {cache_record['last_update']}). نیاز به بروزرسانی دارد.")
+            else:
+                # دریافت چانک‌های کش
+                total_chunks = cache_record.get("total_chunks", 0)
+                chunks_data = []
 
-            product_cache = cache_record["data"]
-            last_cache_update = cache_record["last_update"]
-            update_status["last_update"] = cache_record["last_update"]
-            update_status["total_products"] = len(
-                product_cache) if product_cache else 0
+                for i in range(total_chunks):
+                    chunk = await db.woocommerce_cache.find_one({"type": f"products_cache_chunk_{i}"})
+                    if chunk and "data" in chunk:
+                        chunks_data.extend(chunk["data"])
 
-            # فقط راه‌اندازی زمان‌بندی بدون دانلود اولیه
-            start_scheduled_updates()
-            return
+                if chunks_data:
+                    logger.info(
+                        f"کش محصولات از دیتابیس بازیابی شد: {len(chunks_data)} محصول (آخرین بروزرسانی: {cache_record['last_update']})")
+                    product_cache = chunks_data
+                    last_cache_update = cache_record["last_update"]
+                    update_status["last_update"] = cache_record["last_update"]
+                    update_status["total_products"] = len(chunks_data)
+
+                    # بررسی محصولات معتبر پس از بازیابی
+                    valid_products = []
+                    for product in product_cache:
+                        # بررسی قیمت و permalink معتبر
+                        if (product.get("price") is not None and product.get("price") != "" and
+                            "/product/" in product.get("permalink", "") and
+                                "/?post_type=product&p=" not in product.get("permalink", "")):
+                            valid_products.append(product)
+                        else:
+                            logger.debug(
+                                f"محصول نامعتبر از کش حذف شد: ID {product.get('id')}")
+
+                    # به‌روزرسانی کش با محصولات معتبر
+                    if len(valid_products) < len(product_cache):
+                        logger.info(
+                            f"{len(product_cache) - len(valid_products)} محصول نامعتبر از کش حذف شد")
+                        product_cache = valid_products
+                        update_status["total_products"] = len(valid_products)
+
+                    # فقط راه‌اندازی زمان‌بندی بدون دانلود اولیه
+                    start_scheduled_updates()
+                    return
+                else:
+                    logger.info(
+                        "کش محصولات در دیتابیس خالی است. انجام دانلود اولیه محصولات از WooCommerce...")
         else:
             logger.info(
                 "کش محصولات در دیتابیس یافت نشد یا خالی است. انجام دانلود اولیه محصولات از WooCommerce...")
@@ -100,7 +136,6 @@ def start_scheduled_updates():
         asyncio.run(refresh_product_cache(force=True))
 
     # اجرای زمان‌بندی در یک ترد جداگانه
-    import time
     update_scheduler = threading.Thread(target=run_scheduler, daemon=True)
     update_scheduler.start()
 
@@ -184,7 +219,7 @@ async def refresh_product_cache(force=False) -> bool:
 
 async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
     """
-    دریافت تمام محصولات از WooCommerce API و فیلتر کردن محصولات نامرتبط و بدون عکس.
+    دریافت تمام محصولات از WooCommerce API و فیلتر کردن محصولات نامرتبط، ناموجود و بدون عکس.
 
     Returns:
         list: لیست محصولات فیلتر شده
@@ -275,6 +310,19 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
         # پیش‌پردازش محصولات
         processed_products = []
         for product in all_products:
+            # بررسی قیمت محصول - محصولات بدون قیمت را نادیده می‌گیریم
+            if product.get("price") is None or product.get("price") == "":
+                logger.debug(
+                    f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
+                continue
+
+            # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
+            permalink = product.get("permalink", "")
+            if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
+                logger.debug(
+                    f"محصول با ID {product.get('id')} لینک نامعتبر دارد: {permalink}")
+                continue
+
             # فیلتر کردن محصولات نامرتبط
             if is_unrelated_product(product):
                 continue
@@ -299,6 +347,47 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"خطا در دریافت محصولات از WooCommerce API: {str(e)}")
         return []
+
+
+def is_valid_product(product: Dict[str, Any]) -> bool:
+    """
+    بررسی اعتبار کلی محصول.
+
+    Args:
+        product: محصول WooCommerce
+
+    Returns:
+        bool: True اگر محصول معتبر باشد
+    """
+    # بررسی وجود قیمت معتبر
+    if product.get("price") is None or product.get("price") == "":
+        logger.debug(f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
+        return False
+
+    # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
+    permalink = product.get("permalink", "")
+    if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
+        logger.debug(
+            f"محصول با ID {product.get('id')} لینک نامعتبر دارد: {permalink}")
+        return False
+
+    # بررسی وجود تصویر
+    if not product.get("images"):
+        logger.debug(f"محصول با ID {product.get('id')} تصویر ندارد")
+        return False
+
+    # بررسی عدم ارتباط با محصولات نامرتبط
+    if is_unrelated_product(product):
+        logger.debug(f"محصول با ID {product.get('id')} نامرتبط است")
+        return False
+
+    # بررسی اینکه فریم عینک باشد و عدسی یا پکیج عدسی نباشد
+    if not is_eyeglass_frame(product) or is_lens_or_lens_package(product):
+        logger.debug(
+            f"محصول با ID {product.get('id')} فریم عینک نیست یا عدسی/پکیج عدسی است")
+        return False
+
+    return True
 
 
 def is_lens_or_lens_package(product: Dict[str, Any]) -> bool:
@@ -536,7 +625,13 @@ def filter_products_by_price(products: List[Dict[str, Any]], min_price: Optional
 
     for product in products:
         try:
-            price = float(product.get("price", 0))
+            # بررسی وجود قیمت
+            price_str = product.get("price", "")
+            if not price_str:  # اگر قیمت خالی باشد، محصول را نادیده می‌گیریم
+                continue
+
+            # تبدیل قیمت به عدد
+            price = float(price_str)
 
             # بررسی حداقل قیمت
             if min_price is not None and price < min_price:
@@ -570,15 +665,29 @@ async def get_eyeglass_frames(min_price: Optional[float] = None, max_price: Opti
     # دریافت محصولات از کش
     products = await get_all_products()
 
-    # فیلتر کردن فریم‌های عینک
-    eyeglass_frames = [
-        product for product in products if is_eyeglass_frame(product)]
+    # فیلتر کردن فریم‌های عینک معتبر
+    eyeglass_frames = []
+    for product in products:
+        # بررسی قیمت محصول
+        if product.get("price") is None or product.get("price") == "":
+            continue
+
+        # بررسی permalink
+        permalink = product.get("permalink", "")
+        if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
+            continue
+
+        # بررسی اینکه فریم عینک باشد
+        if is_eyeglass_frame(product) and not is_lens_or_lens_package(product):
+            eyeglass_frames.append(product)
 
     # فیلتر بر اساس قیمت (اگر درخواست شده باشد)
     if min_price is not None or max_price is not None:
         eyeglass_frames = filter_products_by_price(
             eyeglass_frames, min_price, max_price)
 
+    logger.info(
+        f"تعداد {len(eyeglass_frames)} فریم عینک معتبر از {len(products)} محصول یافت شد")
     return eyeglass_frames
 
 
@@ -602,6 +711,145 @@ def sort_products_by_match_score(products: List[Dict[str, Any]], face_shape: str
     return sorted(products, key=lambda x: x.get("match_score", 0), reverse=True)
 
 
+def is_unrelated_product(product: Dict[str, Any]) -> bool:
+    """
+    بررسی اینکه آیا محصول نامرتبط است (مانند "شارژ کیف پول" یا "ماوتفاوت محصول").
+
+    Args:
+        product: محصول WooCommerce
+
+    Returns:
+        bool: True اگر محصول نامرتبط باشد
+    """
+    # کلمات کلیدی برای فیلتر کردن محصولات نامرتبط
+    unrelated_keywords = ["شارژ کیف پول", "ماوتفاوت محصول"]
+
+    # بررسی نام محصول
+    name = product.get("name", "").lower()
+    for keyword in unrelated_keywords:
+        if keyword.lower() in name:
+            return True
+
+    # بررسی دسته‌بندی‌ها
+    categories = product.get("categories", [])
+    for category in categories:
+        category_name = category.get("name", "").lower()
+        for keyword in unrelated_keywords:
+            if keyword.lower() in category_name:
+                return True
+
+    return False
+
+
+async def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
+    """
+    دریافت یک محصول خاص با شناسه از کش.
+
+    Args:
+        product_id: شناسه محصول
+
+    Returns:
+        dict: اطلاعات محصول یا None اگر پیدا نشود
+    """
+    # دریافت محصولات از کش
+    products = await get_all_products()
+
+    # جستجوی محصول با شناسه
+    for product in products:
+        if product.get("id") == product_id:
+            # بررسی اعتبار محصول
+            if is_valid_product(product):
+                return product
+            else:
+                logger.debug(f"محصول با شناسه {product_id} نامعتبر است")
+                return None
+
+    # اگر در کش پیدا نشد، از API درخواست کنیم
+    try:
+        logger.info(f"دریافت محصول با شناسه {product_id} از WooCommerce API")
+
+        # API پارامترها
+        api_url = f"{settings.WOOCOMMERCE_API_URL}/{product_id}"
+        consumer_key = settings.WOOCOMMERCE_CONSUMER_KEY
+        consumer_secret = settings.WOOCOMMERCE_CONSUMER_SECRET
+
+        # ارسال درخواست
+        async with aiohttp.ClientSession() as session:
+            params = {
+                "consumer_key": consumer_key,
+                "consumer_secret": consumer_secret
+            }
+
+            async with session.get(api_url, params=params, timeout=30) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(
+                        f"خطا در WooCommerce API: {response.status} - {error_text}")
+                    return None
+
+                product = await response.json()
+
+                # بررسی اعتبار محصول
+                if is_valid_product(product):
+                    return product
+                else:
+                    logger.debug(f"محصول با شناسه {product_id} نامعتبر است")
+                    return None
+
+    except Exception as e:
+        logger.error(f"خطا در دریافت محصول با شناسه {product_id}: {str(e)}")
+        return None
+
+
+async def get_products_by_category(category_id: int) -> List[Dict[str, Any]]:
+    """
+    دریافت محصولات یک دسته‌بندی خاص از کش.
+
+    Args:
+        category_id: شناسه دسته‌بندی
+
+    Returns:
+        list: لیست محصولات
+    """
+    # دریافت محصولات از کش
+    products = await get_all_products()
+
+    # فیلتر محصولات براساس دسته‌بندی و اعتبار
+    category_products = []
+    for product in products:
+        # بررسی اعتبار محصول
+        if not is_valid_product(product):
+            continue
+
+        # بررسی دسته‌بندی‌های محصول
+        categories = product.get("categories", [])
+        for category in categories:
+            if category.get("id") == category_id:
+                category_products.append(product)
+                break
+
+    return category_products
+
+
+async def get_cache_status() -> Dict[str, Any]:
+    """
+    دریافت وضعیت فعلی کش محصولات.
+
+    Returns:
+        dict: وضعیت کش محصولات
+    """
+    global product_cache, last_cache_update, update_status
+
+    return {
+        "cache_initialized": product_cache is not None,
+        "total_products": len(product_cache) if product_cache else 0,
+        "last_update": last_cache_update,
+        "update_in_progress": update_status["in_progress"],
+        "last_error": update_status["last_error"],
+        "eyeglass_frames_count": len([p for p in (product_cache or []) if p.get("is_eyeglass_frame", False)])
+    }
+
+
 async def get_recommended_frames(face_shape: str, min_price: Optional[float] = None, max_price: Optional[float] = None, limit: int = 15) -> Dict[str, Any]:
     """
     دریافت فریم‌های پیشنهادی بر اساس شکل چهره با ترکیبی از انواع مختلف عینک.
@@ -617,6 +865,13 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
     """
     try:
         logger.info(f"دریافت فریم‌های پیشنهادی برای شکل چهره {face_shape}")
+
+        # بررسی معتبر بودن شکل چهره
+        valid_shapes = {"HEART", "OBLONG", "OVAL", "ROUND", "SQUARE"}
+        if face_shape not in valid_shapes:
+            logger.warning(
+                f"شکل چهره {face_shape} معتبر نیست. استفاده از OVAL به عنوان پیش‌فرض.")
+            face_shape = "OVAL"
 
         # دریافت انواع فریم توصیه شده برای این شکل چهره
         recommended_frame_types = get_recommended_frame_types(face_shape)
@@ -759,6 +1014,15 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
         # تبدیل به فرمت پاسخ مورد نظر
         recommended_frames = []
         for product in selected_frames:
+            # بررسی قیمت محصول - محصولات بدون قیمت را نادیده می‌گیریم
+            if product.get("price") is None or product.get("price") == "":
+                continue
+
+            # بررسی permalink
+            permalink = product.get("permalink", "")
+            if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
+                continue
+
             frame_type = product.get("frame_type", get_frame_type(product))
             match_score = product.get("match_score", 0)
 
@@ -806,223 +1070,3 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
             "success": False,
             "message": f"خطا در تطبیق فریم: {str(e)}"
         }
-
-
-def is_unrelated_product(product: Dict[str, Any]) -> bool:
-    """
-    بررسی اینکه آیا محصول نامرتبط است (مانند "شارژ کیف پول" یا "ماوتفاوت محصول").
-
-    Args:
-        product: محصول WooCommerce
-
-    Returns:
-        bool: True اگر محصول نامرتبط باشد
-    """
-    # کلمات کلیدی برای فیلتر کردن محصولات نامرتبط
-    unrelated_keywords = ["شارژ کیف پول", "ماوتفاوت محصول"]
-
-    # بررسی نام محصول
-    name = product.get("name", "").lower()
-    for keyword in unrelated_keywords:
-        if keyword.lower() in name:
-            return True
-
-    # بررسی دسته‌بندی‌ها
-    categories = product.get("categories", [])
-    for category in categories:
-        category_name = category.get("name", "").lower()
-        for keyword in unrelated_keywords:
-            if keyword.lower() in category_name:
-                return True
-
-    return False
-
-
-async def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
-    """
-    دریافت یک محصول خاص با شناسه از کش.
-
-    Args:
-        product_id: شناسه محصول
-
-    Returns:
-        dict: اطلاعات محصول یا None اگر پیدا نشود
-    """
-    # دریافت محصولات از کش
-    products = await get_all_products()
-
-    # جستجوی محصول با شناسه
-    for product in products:
-        if product.get("id") == product_id:
-            return product
-
-    # اگر در کش پیدا نشد، از API درخواست کنیم
-    try:
-        logger.info(f"دریافت محصول با شناسه {product_id} از WooCommerce API")
-
-        # API پارامترها
-        api_url = f"{settings.WOOCOMMERCE_API_URL}/{product_id}"
-        consumer_key = settings.WOOCOMMERCE_CONSUMER_KEY
-        consumer_secret = settings.WOOCOMMERCE_CONSUMER_SECRET
-
-        # ارسال درخواست
-        async with aiohttp.ClientSession() as session:
-            params = {
-                "consumer_key": consumer_key,
-                "consumer_secret": consumer_secret
-            }
-
-            async with session.get(api_url, params=params, timeout=30) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(
-                        f"خطا در WooCommerce API: {response.status} - {error_text}")
-                    return None
-
-                product = await response.json()
-                return product
-
-    except Exception as e:
-        logger.error(f"خطا در دریافت محصول با شناسه {product_id}: {str(e)}")
-        return None
-
-
-async def get_products_by_category(category_id: int) -> List[Dict[str, Any]]:
-    """
-    دریافت محصولات یک دسته‌بندی خاص از کش.
-
-    Args:
-        category_id: شناسه دسته‌بندی
-
-    Returns:
-        list: لیست محصولات
-    """
-    # دریافت محصولات از کش
-    products = await get_all_products()
-
-    # فیلتر محصولات براساس دسته‌بندی
-    category_products = []
-    for product in products:
-        categories = product.get("categories", [])
-        for category in categories:
-            if category.get("id") == category_id:
-                category_products.append(product)
-                break
-
-    return category_products
-
-
-async def get_cache_status() -> Dict[str, Any]:
-    """
-    دریافت وضعیت فعلی کش محصولات.
-
-    Returns:
-        dict: وضعیت کش محصولات
-    """
-    global product_cache, last_cache_update, update_status
-
-    return {
-        "cache_initialized": product_cache is not None,
-        "total_products": len(product_cache) if product_cache else 0,
-        "last_update": last_cache_update,
-        "update_in_progress": update_status["in_progress"],
-        "last_error": update_status["last_error"]
-    }
-
-
-async def save_woocommerce_cache(products: List[Dict[str, Any]], last_update: datetime) -> bool:
-    """
-    ذخیره کش محصولات WooCommerce در دیتابیس به صورت چند بخشی.
-
-    Args:
-        products: لیست محصولات
-        last_update: زمان آخرین بروزرسانی
-
-    Returns:
-        bool: نتیجه عملیات ذخیره‌سازی
-    """
-    try:
-        db = get_database()
-
-        # حذف تمام رکوردهای قبلی مرتبط با کش
-        logger.info("حذف رکوردهای قبلی کش از دیتابیس...")
-        await db.woocommerce_cache.delete_many({"type": {"$regex": "^products_cache"}})
-
-        # تعیین اندازه هر بخش (300 محصول در هر بخش)
-        chunk_size = 300
-        chunks = [products[i:i + chunk_size]
-                  for i in range(0, len(products), chunk_size)]
-
-        logger.info(
-            f"تقسیم {len(products)} محصول به {len(chunks)} بخش (هر بخش حداکثر {chunk_size} محصول)")
-
-        # ذخیره هر بخش به صورت جداگانه
-        for i, chunk in enumerate(chunks):
-            await db.woocommerce_cache.insert_one({
-                "type": f"products_cache_chunk_{i}",
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-                "last_update": last_update,
-                "data": chunk
-            })
-            logger.info(
-                f"بخش {i+1} از {len(chunks)} با {len(chunk)} محصول ذخیره شد")
-
-        # ذخیره متادیتا
-        await db.woocommerce_cache.insert_one({
-            "type": "products_cache_meta",
-            "last_update": last_update,
-            "total_products": len(products),
-            "total_chunks": len(chunks),
-            "chunk_size": chunk_size,
-            "eyeglass_frames_count": sum(1 for p in products if p.get("is_eyeglass_frame", False))
-        })
-
-        logger.info(
-            f"کش محصولات WooCommerce با موفقیت در دیتابیس ذخیره شد ({len(products)} محصول در {len(chunks)} بخش)")
-        return True
-
-    except Exception as e:
-        logger.error(f"خطا در ذخیره کش محصولات در دیتابیس: {str(e)}")
-        return False
-
-
-async def get_woocommerce_cache() -> Tuple[Optional[List[Dict[str, Any]]], Optional[datetime]]:
-    """
-    دریافت کش محصولات WooCommerce از دیتابیس.
-
-    Returns:
-        tuple: (محصولات، تاریخ_آخرین_بروزرسانی) یا (None, None) در صورت عدم وجود کش
-    """
-    try:
-        db = get_database()
-
-        # دریافت متادیتای کش
-        meta = await db.woocommerce_cache.find_one({"type": "products_cache_meta"})
-
-        if not meta:
-            logger.warning("متادیتای کش محصولات در دیتابیس یافت نشد")
-            return None, None
-
-        total_chunks = meta.get("total_chunks", 0)
-        last_update = meta.get("last_update")
-
-        # دریافت تمام بخش‌ها
-        all_products = []
-        for i in range(total_chunks):
-            chunk = await db.woocommerce_cache.find_one({"type": f"products_cache_chunk_{i}"})
-            if chunk and "data" in chunk:
-                all_products.extend(chunk["data"])
-                logger.debug(
-                    f"بخش {i+1} از {total_chunks} با {len(chunk['data'])} محصول بازیابی شد")
-
-        if not all_products:
-            logger.warning("داده‌های کش محصولات در دیتابیس یافت نشد")
-            return None, None
-
-        logger.info(f"{len(all_products)} محصول از کش دیتابیس بازیابی شد")
-        return all_products, last_update
-
-    except Exception as e:
-        logger.error(f"خطا در دریافت کش محصولات از دیتابیس: {str(e)}")
-        return None, None
