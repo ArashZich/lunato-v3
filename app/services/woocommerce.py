@@ -194,6 +194,11 @@ async def refresh_product_cache(force=False) -> bool:
             logger.info(
                 f"دانلود محصولات از WooCommerce API با موفقیت انجام شد. تعداد محصولات: {len(products)}")
 
+            # اضافه کردن لاگ برای محصولات موجود
+            eyeglass_frames_count = sum(
+                1 for p in products if is_eyeglass_frame(p))
+            logger.info(f"تعداد فریم‌های عینک موجود: {eyeglass_frames_count}")
+
             # ذخیره در دیتابیس
             try:
                 logger.info("در حال ذخیره محصولات دانلود شده در دیتابیس...")
@@ -310,10 +315,17 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
         # پیش‌پردازش محصولات
         processed_products = []
         for product in all_products:
+
             # بررسی قیمت محصول - محصولات بدون قیمت را نادیده می‌گیریم
             if product.get("price") is None or product.get("price") == "":
                 logger.debug(
                     f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
+                continue
+
+            # اضافه کردن این شرط برای فیلتر کردن محصولات ناموجود
+            if product.get("price_html") == "ناموجود" or "ناموجود" in product.get("price_html", ""):
+                logger.debug(
+                    f"محصول با ID {product.get('id')} ناموجود است (price_html: ناموجود)")
                 continue
 
             # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
@@ -362,6 +374,12 @@ def is_valid_product(product: Dict[str, Any]) -> bool:
     # بررسی وجود قیمت معتبر
     if product.get("price") is None or product.get("price") == "":
         logger.debug(f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
+        return False
+
+    # بررسی وضعیت موجودی از طریق price_html
+    if product.get("price_html") == "ناموجود" or "ناموجود" in product.get("price_html", ""):
+        logger.debug(
+            f"محصول با ID {product.get('id')} ناموجود است (price_html: ناموجود)")
         return False
 
     # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
@@ -982,7 +1000,6 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
                 frames) > top_count else []
 
             if remaining_frames and random_count > 0:
-                import random
                 # انتخاب تصادفی از فریم‌های باقیمانده (بدون تکرار)
                 random_frames = random.sample(remaining_frames, min(
                     random_count, len(remaining_frames)))
@@ -1008,7 +1025,6 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
         selected_frames = selected_eyeglasses + selected_sunglasses + selected_others
 
         # ایجاد تنوع در نتایج نهایی با جابجایی تصادفی
-        import random
         random.shuffle(selected_frames)
 
         # تبدیل به فرمت پاسخ مورد نظر
