@@ -225,6 +225,7 @@ async def refresh_product_cache(force=False) -> bool:
 async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
     """
     دریافت تمام محصولات از WooCommerce API و فیلتر کردن محصولات نامرتبط، ناموجود و بدون عکس.
+    با معیارهای فیلتر کمتر سختگیرانه برای حفظ بیشتر محصولات.
 
     Returns:
         list: لیست محصولات فیلتر شده
@@ -327,36 +328,38 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
         # پیش‌پردازش محصولات
         processed_products = []
         for product in all_products:
-            # بررسی وضعیت موجودی - محصولات ناموجود را نادیده می‌گیریم
+            # فقط فیلترهای ضروری را اعمال می‌کنیم
+
+            # 1. بررسی وضعیت موجودی - محصولات ناموجود را نادیده می‌گیریم
             if product.get("stock_status") != "instock":
                 out_of_stock_count += 1
                 continue
 
-            # بررسی permalink - فقط محصولاتی که لینک معتبر دارند
+            # 2. بررسی permalink - فقط محصولاتی که لینک نامعتبر دارند رد می‌شوند
             permalink = product.get("permalink", "")
-            if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
+            if "/?post_type=product&p=" in permalink:
                 invalid_permalink_count += 1
                 continue
 
-            # بررسی عدم ارتباط با محصولات نامرتبط
+            # 3. بررسی عدم ارتباط با محصولات نامرتبط
             if is_unrelated_product(product):
                 unrelated_count += 1
                 continue
 
-            # بررسی اینکه فریم عینک باشد
-            if not is_eyeglass_frame(product):
-                non_eyeglass_count += 1
+            # 4. بررسی وجود تصویر
+            if not product.get("images"):
+                no_image_count += 1
                 continue
 
-            # بررسی اینکه عدسی یا پکیج عدسی نباشد
+            # 5. بررسی اینکه عدسی یا پکیج عدسی نباشد
             if is_lens_or_lens_package(product):
                 lens_package_count += 1
                 continue
 
-            # بررسی وجود تصویر
-            if not product.get("images"):
-                no_image_count += 1
-                continue
+            # شمارش غیر فریم‌ها اما بدون رد کردن آنها
+            if not is_eyeglass_frame(product):
+                non_eyeglass_count += 1
+                # ما این محصول را رد نمی‌کنیم، فقط می‌شماریم
 
             # اضافه کردن محصول معتبر
             processed_products.append(product)
@@ -369,7 +372,7 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
             f"محصولات ناموجود (stock_status != instock): {out_of_stock_count}")
         logger.info(f"محصولات با لینک نامعتبر: {invalid_permalink_count}")
         logger.info(f"محصولات نامرتبط: {unrelated_count}")
-        logger.info(f"محصولات غیر فریم عینک: {non_eyeglass_count}")
+        logger.info(f"محصولات غیر فریم عینک (شمارش): {non_eyeglass_count}")
         logger.info(f"عدسی‌ها و پکیج‌های عدسی: {lens_package_count}")
         logger.info(f"محصولات بدون تصویر: {no_image_count}")
         logger.info(f"تعداد محصولات معتبر نهایی: {valid_count}")
@@ -428,6 +431,7 @@ def is_valid_product(product: Dict[str, Any]) -> bool:
 def is_lens_or_lens_package(product: Dict[str, Any]) -> bool:
     """
     بررسی اینکه آیا محصول یک عدسی یا پکیج عدسی است.
+    با تشخیص دقیق‌تر و کمتر سختگیرانه.
 
     Args:
         product: محصول WooCommerce
@@ -435,35 +439,45 @@ def is_lens_or_lens_package(product: Dict[str, Any]) -> bool:
     Returns:
         bool: True اگر محصول عدسی یا پکیج عدسی باشد
     """
-    # بررسی نام محصول
-    name = product.get("name", "").lower()
-    description = product.get("description", "").lower()
-
-    lens_keywords = [
-        "عدسی", "عدسى", "lens", "lenses", "پکیج عدسی", "package lens",
-        "optical", "محافظ", "بلوکات", "blue cut", "blue light",
-        "آنتی رفلکس", "anti-reflective", "فتوکرومیک", "photochromic"
+    # استفاده از کلیدواژه‌های دقیق‌تر با حداقل تطابق
+    exact_lens_keywords = [
+        "عدسی ", " عدسی", "عدسي ", " عدسي",  # کلمه عدسی با فاصله برای تشخیص دقیق‌تر
+        "lens package", "package lens", "lens kit",
+        "پکیج عدسی", "پکیج لنز",
+        "anti-reflective lens", "آنتی رفلکس", "عدسی فتوکرومیک"
     ]
 
-    # بررسی وجود کلیدواژه‌های عدسی در نام یا توضیحات
-    for keyword in lens_keywords:
-        if keyword in name or keyword in description:
+    # بررسی وجود کلیدواژه‌های عدسی در نام محصول (دقیق‌تر)
+    name = product.get("name", "").lower()
+
+    for keyword in exact_lens_keywords:
+        if keyword.lower() in name:
             return True
 
-    # بررسی دسته‌بندی‌های محصول
+    # بررسی دقیق‌تر دسته‌بندی محصول
     categories = product.get("categories", [])
     for category in categories:
+        category_id = category.get("id", 0)
         category_name = category.get("name", "").lower()
-        if "lens" in category_name or "عدسی" in category_name:
+
+        # اگر در دسته‌بندی خاص عدسی قرار دارد
+        if category_id in [19, 20, 21, 22]:  # فرض کردم این IDها برای دسته‌بندی عدسی هستند
             return True
 
-    # بررسی ویژگی‌های محصول
+        # فقط اگر نام دسته‌بندی دقیقاً عدسی باشد
+        if category_name in ["lens", "lenses", "عدسی", "عدسي", "لنز"]:
+            return True
+
+    # بررسی ویژگی‌های محصول با دقت بیشتر
     attributes = product.get("attributes", [])
     for attribute in attributes:
         attr_name = attribute.get("name", "").lower()
-        if "lens" in attr_name or "عدسی" in attr_name:
+
+        # فقط اگر یک ویژگی مستقیماً به عدسی اشاره دارد
+        if attr_name in ["lens type", "نوع عدسی", "عدسی", "lens"]:
             return True
 
+    # در صورتی که پس از بررسی‌های دقیق، تشخیص عدسی نبود
     return False
 
 
@@ -488,84 +502,57 @@ async def get_all_products() -> List[Dict[str, Any]]:
     return product_cache if product_cache is not None else []
 
 
-# def is_eyeglass_frame(product: Dict[str, Any]) -> bool:
-#     """
-#     بررسی اینکه آیا محصول یک فریم عینک است.
-
-#     Args:
-#         product: محصول WooCommerce
-
-#     Returns:
-#         bool: True اگر محصول فریم عینک باشد
-#     """
-#     # اگر قبلاً محاسبه شده، از آن استفاده کنیم
-#     if "is_eyeglass_frame" in product:
-#         return product["is_eyeglass_frame"]
-
-#     # بررسی دسته‌بندی‌های محصول
-#     categories = product.get("categories", [])
-#     for category in categories:
-#         category_id = category.get("id", 0)
-#         category_name = category.get("name", "").lower()
-
-#         # دسته‌بندی‌های مورد نظر ما
-#         if category_id in [5215, 18, 17, 5216]:
-#             # اما باید مطمئن شویم که عدسی نیست
-#             if is_lens_or_lens_package(product):
-#                 return False
-#             return True
-
-#         # بررسی نام دسته‌بندی
-#         frame_keywords = ["عینک", "frame",
-#                           "eyeglass", "glasses", "eyewear", "فریم"]
-#         for keyword in frame_keywords:
-#             if keyword in category_name:
-#                 # اما باید مطمئن شویم که عدسی نیست
-#                 if is_lens_or_lens_package(product):
-#                     return False
-#                 return True
-
-#     # بررسی نام محصول
-#     name = product.get("name", "").lower()
-#     description = product.get("description", "").lower()
-
-#     frame_keywords = ["عینک", "فریم", "eyeglass",
-#                       "glasses", "frame", "eyewear"]
-#     lens_keywords = ["عدسی", "lens", "package"]
-
-#     # بررسی همزمان کلیدواژه‌های فریم و عدسی
-#     has_frame_keyword = any(
-#         keyword in name or keyword in description for keyword in frame_keywords)
-#     has_lens_keyword = any(
-#         keyword in name or keyword in description for keyword in lens_keywords)
-
-#     # باید کلیدواژه فریم داشته باشد و کلیدواژه عدسی نداشته باشد
-#     if has_frame_keyword and not has_lens_keyword:
-#         return True
-
-#     return False
-
 def is_eyeglass_frame(product: Dict[str, Any]) -> bool:
     """
     بررسی اینکه آیا محصول یک فریم عینک است.
+    با معیارهای کمتر سختگیرانه.
+
+    Args:
+        product: محصول WooCommerce
+
+    Returns:
+        bool: True اگر محصول فریم عینک باشد
     """
-    # بررسی ساده‌تر - فقط دسته‌بندی‌های اصلی عینک چک شوند
+    # اگر قبلاً محاسبه شده، از آن استفاده کنیم
+    if "is_eyeglass_frame" in product:
+        return product["is_eyeglass_frame"]
+
+    # 1. اگر در دسته‌بندی‌های اصلی عینک است، به احتمال زیاد فریم است
     categories = product.get("categories", [])
     for category in categories:
         category_id = category.get("id", 0)
-        # اگر در یکی از دسته‌بندی‌های اصلی عینک است، معتبر تلقی شود
+
+        # اگر در یکی از دسته‌بندی‌های اصلی عینک است
         if category_id in [5215, 18, 17, 5216]:  # دسته‌های عینک
-            # فقط بررسی کنیم که نام محصول حاوی کلمه "عدسی" نباشد
+            # فقط کلمات کلیدی خیلی مشخص عدسی را بررسی کنیم
             name = product.get("name", "").lower()
-            if "lens" not in name and "عدسی" not in name and "پکیج" not in name:
+            if "lens package" not in name and "پکیج عدسی" not in name:
                 return True
 
-    # بررسی اضافی اگر دسته‌بندی نداشت ولی در نام آن کلمه عینک یا فریم بود
+    # 2. اگر به طور مشخص کلمه فریم یا عینک در نام محصول دارد
     name = product.get("name", "").lower()
-    if "عینک" in name or "فریم" in name or "eyeglasses" in name or "frame" in name:
-        if "lens" not in name and "عدسی" not in name and "پکیج" not in name:
+    frame_keywords = ["عینک", "فریم", "eyeglass",
+                      "eyeglasses", "frame", "glasses", "eyewear"]
+
+    for keyword in frame_keywords:
+        if keyword in name:
+            # بررسی اینکه کلمات خاص عدسی در نام نباشد
+            if "lens package" not in name and "پکیج عدسی" not in name and "عدسی " not in name:
+                return True
+
+    # 3. اگر ویژگی‌های مربوط به فریم عینک دارد
+    attributes = product.get("attributes", [])
+    for attribute in attributes:
+        attr_name = attribute.get("name", "").lower()
+        attr_options = attribute.get("options", [])
+
+        # ویژگی‌های مرتبط با فریم
+        frame_attributes = ["شکل فریم", "نوع فریم", "frame type",
+                            "frame shape", "frame color", "رنگ فریم", "جنس فریم"]
+        if any(frame_attr in attr_name for frame_attr in frame_attributes):
             return True
 
+    # پیش‌فرض: اگر در دسته‌بندی عینک نیست و کلمات کلیدی ندارد، احتمالاً فریم نیست
     return False
 
 

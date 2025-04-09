@@ -1,0 +1,21 @@
+2025-04-09 17:21:48,235 - app.services.woocommerce - INFO - مجموع محصولات دانلود شده از دسته‌بندی sunglasses: 5013                      
+2025-04-09 17:21:48,238 - app.services.woocommerce - INFO - در حال دانلود محصولات دسته‌بندی reading-glasses (ID: 5216)...     
+2025-04-09 17:21:50,955 - app.services.woocommerce - INFO - دانلود صفحه 1 از دسته‌بندی reading-glasses با 81 محصول انجام شد             
+2025-04-09 17:21:50,955 - app.services.woocommerce - INFO - دانلود محصولات دسته‌بندی reading-glasses کامل شد. صفحه آخر: 1                
+2025-04-09 17:21:50,955 - app.services.woocommerce - INFO - مجموع محصولات دانلود شده از دسته‌بندی reading-glasses: 81                     2025-04-09 17:21:50,955 - app.services.woocommerce - INFO - پیش‌پردازش 7268 محصول دانلود شده...                      
+2025-04-09 17:21:51,051 - app.services.woocommerce - INFO - ===== آمار فیلتر محصولات =====                             
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - تعداد کل محصولات دانلود شده: 7268               
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - محصولات ناموجود (stock_status != instock): 4926                 
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - محصولات با لینک نامعتبر: 126                                        
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - محصولات نامرتبط: 2                                                   
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - محصولات غیر فریم عینک: 9                                              
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - عدسی‌ها و پکیج‌های عدسی: 2199                                            
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - محصولات بدون تصویر: 0                                                    
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - تعداد محصولات معتبر نهایی: 6                                               
+2025-04-09 17:21:51,052 - app.services.woocommerce - INFO - ================================                                             
+2025-04-09 17:21:51,278 - app.services.woocommerce - INFO - دانلود محصولات از WooCommerce API با موفقیت انجام شد. تعداد محصولات: 6
+2025-04-09 17:21:51,279 - app.services.woocommerce - INFO - تعداد فریم‌های عینک موجود: 6                                             
+2025-04-09 17:21:51,279 - app.services.woocommerce - INFO - در حال ذخیره محصولات دانلود شده در دیتابیس...                             
+2025-04-09 17:21:51,291 - app.db.repository - INFO - کش محصولات WooCommerce در 1 چانک در دیتابیس ذخیره شد                                
+2025-04-09 17:21:51,291 - app.services.woocommerce - INFO - بروزرسانی کش محصولات WooCommerce با موفقیت انجام شد (6 محصول)                
+2025-04-09 17:21:51,292 - app.services.woocommerce - INFO - زمان‌بندی بروزرسانی خودکار محصولات WooCommerce فعال شد (دوشنبه ها و پنجشنبه ها
