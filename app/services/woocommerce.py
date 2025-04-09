@@ -328,42 +328,18 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
         processed_products = []
         for product in all_products:
             # بررسی وضعیت موجودی - محصولات ناموجود را نادیده می‌گیریم
+            # اگر می‌خواهید محصولات ناموجود هم نمایش داده شوند، این شرط را تغییر دهید
             if product.get("stock_status") != "instock":
-                out_of_stock_count += 1
+                # اختیاری: می‌توانید این خط را حذف کنید تا محصولات ناموجود هم نمایش داده شوند
                 continue
 
-            # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
+            # بررسی permalink - فقط محصولاتی که لینک معتبر دارند
             permalink = product.get("permalink", "")
-            if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
+            if "/?post_type=product&p=" in permalink:
                 invalid_permalink_count += 1
                 continue
 
-            # فیلتر کردن محصولات نامرتبط
-            if is_unrelated_product(product):
-                unrelated_count += 1
-                continue
-
-            # افزودن فیلد نوع فریم
-            product["frame_type"] = get_frame_type(product)
-
-            # افزودن فیلد آیا فریم عینک است
-            product["is_eyeglass_frame"] = is_eyeglass_frame(product)
-
-            if not is_eyeglass_frame(product):
-                non_eyeglass_count += 1
-                continue
-
-            # فیلتر کردن عدسی‌ها و پکیج عدسی
-            if is_lens_or_lens_package(product):
-                lens_package_count += 1
-                continue
-
-            # فیلتر کردن محصولات بدون عکس
-            if not product.get("images"):
-                no_image_count += 1
-                continue
-
-            # اضافه کردن محصول معتبر
+            # اضافه کردن محصول معتبر با یک شرط ساده‌تر
             processed_products.append(product)
             valid_count += 1
 
@@ -493,6 +469,63 @@ async def get_all_products() -> List[Dict[str, Any]]:
     return product_cache if product_cache is not None else []
 
 
+# def is_eyeglass_frame(product: Dict[str, Any]) -> bool:
+#     """
+#     بررسی اینکه آیا محصول یک فریم عینک است.
+
+#     Args:
+#         product: محصول WooCommerce
+
+#     Returns:
+#         bool: True اگر محصول فریم عینک باشد
+#     """
+#     # اگر قبلاً محاسبه شده، از آن استفاده کنیم
+#     if "is_eyeglass_frame" in product:
+#         return product["is_eyeglass_frame"]
+
+#     # بررسی دسته‌بندی‌های محصول
+#     categories = product.get("categories", [])
+#     for category in categories:
+#         category_id = category.get("id", 0)
+#         category_name = category.get("name", "").lower()
+
+#         # دسته‌بندی‌های مورد نظر ما
+#         if category_id in [5215, 18, 17, 5216]:
+#             # اما باید مطمئن شویم که عدسی نیست
+#             if is_lens_or_lens_package(product):
+#                 return False
+#             return True
+
+#         # بررسی نام دسته‌بندی
+#         frame_keywords = ["عینک", "frame",
+#                           "eyeglass", "glasses", "eyewear", "فریم"]
+#         for keyword in frame_keywords:
+#             if keyword in category_name:
+#                 # اما باید مطمئن شویم که عدسی نیست
+#                 if is_lens_or_lens_package(product):
+#                     return False
+#                 return True
+
+#     # بررسی نام محصول
+#     name = product.get("name", "").lower()
+#     description = product.get("description", "").lower()
+
+#     frame_keywords = ["عینک", "فریم", "eyeglass",
+#                       "glasses", "frame", "eyewear"]
+#     lens_keywords = ["عدسی", "lens", "package"]
+
+#     # بررسی همزمان کلیدواژه‌های فریم و عدسی
+#     has_frame_keyword = any(
+#         keyword in name or keyword in description for keyword in frame_keywords)
+#     has_lens_keyword = any(
+#         keyword in name or keyword in description for keyword in lens_keywords)
+
+#     # باید کلیدواژه فریم داشته باشد و کلیدواژه عدسی نداشته باشد
+#     if has_frame_keyword and not has_lens_keyword:
+#         return True
+
+#     return False
+
 def is_eyeglass_frame(product: Dict[str, Any]) -> bool:
     """
     بررسی اینکه آیا محصول یک فریم عینک است.
@@ -503,52 +536,19 @@ def is_eyeglass_frame(product: Dict[str, Any]) -> bool:
     Returns:
         bool: True اگر محصول فریم عینک باشد
     """
-    # اگر قبلاً محاسبه شده، از آن استفاده کنیم
-    if "is_eyeglass_frame" in product:
-        return product["is_eyeglass_frame"]
-
     # بررسی دسته‌بندی‌های محصول
     categories = product.get("categories", [])
     for category in categories:
         category_id = category.get("id", 0)
-        category_name = category.get("name", "").lower()
 
-        # دسته‌بندی‌های مورد نظر ما
-        if category_id in [5215, 18, 17, 5216]:
-            # اما باید مطمئن شویم که عدسی نیست
-            if is_lens_or_lens_package(product):
-                return False
-            return True
-
-        # بررسی نام دسته‌بندی
-        frame_keywords = ["عینک", "frame",
-                          "eyeglass", "glasses", "eyewear", "فریم"]
-        for keyword in frame_keywords:
-            if keyword in category_name:
-                # اما باید مطمئن شویم که عدسی نیست
-                if is_lens_or_lens_package(product):
-                    return False
+        # اگر محصول در یکی از دسته‌بندی‌های عینک باشد، آن را معتبر درنظر بگیر
+        if category_id in [5215, 18, 17, 5216]:  # دسته‌های مرتبط با عینک
+            # فقط بررسی کنیم محصول عدسی نباشد
+            if not is_lens_or_lens_package(product):
                 return True
 
-    # بررسی نام محصول
-    name = product.get("name", "").lower()
-    description = product.get("description", "").lower()
-
-    frame_keywords = ["عینک", "فریم", "eyeglass",
-                      "glasses", "frame", "eyewear"]
-    lens_keywords = ["عدسی", "lens", "package"]
-
-    # بررسی همزمان کلیدواژه‌های فریم و عدسی
-    has_frame_keyword = any(
-        keyword in name or keyword in description for keyword in frame_keywords)
-    has_lens_keyword = any(
-        keyword in name or keyword in description for keyword in lens_keywords)
-
-    # باید کلیدواژه فریم داشته باشد و کلیدواژه عدسی نداشته باشد
-    if has_frame_keyword and not has_lens_keyword:
-        return True
-
-    return False
+    # اگر مطمئن نیستیم، پیش‌فرض را True قرار دهیم
+    return True
 
 
 def get_frame_type(product: Dict[str, Any]) -> str:
@@ -763,12 +763,14 @@ def is_unrelated_product(product: Dict[str, Any]) -> bool:
         bool: True اگر محصول نامرتبط باشد
     """
     # کلمات کلیدی برای فیلتر کردن محصولات نامرتبط
-    unrelated_keywords = ["شارژ کیف پول", "ماوتفاوت محصول"]
+    unrelated_keywords = ["شارژ کیف پول",
+                          "ماوتفاوت محصول", "شارژ کیف", "ماوتفاوت", "کیف پول"]
 
     # بررسی نام محصول
     name = product.get("name", "").lower()
     for keyword in unrelated_keywords:
-        if keyword.lower() in name:
+        if keyword.lower() in name.lower():  # تغییر: تبدیل همه به lowercase برای مقایسه بهتر
+            logger.debug(f"محصول نامرتبط تشخیص داده شد: {name}")
             return True
 
     # بررسی دسته‌بندی‌ها
@@ -776,8 +778,17 @@ def is_unrelated_product(product: Dict[str, Any]) -> bool:
     for category in categories:
         category_name = category.get("name", "").lower()
         for keyword in unrelated_keywords:
-            if keyword.lower() in category_name:
+            if keyword.lower() in category_name.lower():  # تغییر: تبدیل همه به lowercase
+                logger.debug(
+                    f"محصول با دسته‌بندی نامرتبط تشخیص داده شد: {category_name}")
                 return True
+
+    # بررسی توضیحات کوتاه محصول
+    short_description = product.get("short_description", "").lower()
+    for keyword in unrelated_keywords:
+        if keyword.lower() in short_description.lower():  # تغییر: بررسی توضیحات کوتاه
+            logger.debug(f"محصول با توضیحات نامرتبط تشخیص داده شد")
+            return True
 
     return False
 
@@ -894,15 +905,6 @@ async def get_cache_status() -> Dict[str, Any]:
 async def get_recommended_frames(face_shape: str, min_price: Optional[float] = None, max_price: Optional[float] = None, limit: int = 15) -> Dict[str, Any]:
     """
     دریافت فریم‌های پیشنهادی بر اساس شکل چهره با ترکیبی از انواع مختلف عینک.
-
-    Args:
-        face_shape: شکل چهره
-        min_price: حداقل قیمت (اختیاری)
-        max_price: حداکثر قیمت (اختیاری)
-        limit: حداکثر تعداد توصیه‌ها (پیش‌فرض: 15)
-
-    Returns:
-        dict: نتیجه عملیات شامل فریم‌های توصیه شده
     """
     try:
         logger.info(f"دریافت فریم‌های پیشنهادی برای شکل چهره {face_shape}")
@@ -928,6 +930,14 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
         # دریافت فریم‌های عینک از کش
         all_frames = await get_eyeglass_frames(min_price, max_price)
 
+        # فیلتر کردن محصولات نامرتبط به صورت دستی
+        filtered_frames = [
+            frame for frame in all_frames if not is_unrelated_product(frame)]
+        if len(filtered_frames) < len(all_frames):
+            logger.info(
+                f"تعداد {len(all_frames) - len(filtered_frames)} محصول نامرتبط حذف شد")
+            all_frames = filtered_frames
+
         logger.info(
             f"تعداد کل فریم‌های عینک پس از فیلتر اولیه: {len(all_frames)}")
 
@@ -938,12 +948,27 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
                 "message": "خطا در دریافت فریم‌های موجود"
             }
 
+        # اگر تعداد فریم‌های موجود کمتر از حد درخواستی است، حداقل نیمی از فریم‌ها
+        # را به فریم‌های پیشنهادی اختصاص می‌دهیم
+        if len(all_frames) < limit * 2:
+            logger.warning(
+                f"تعداد کل فریم‌ها ({len(all_frames)}) کمتر از دو برابر حد درخواستی ({limit*2}) است")
+            recommended_limit = max(
+                min(len(all_frames), limit), len(all_frames) // 2)
+        else:
+            recommended_limit = limit
+
         # جداسازی عینک‌ها براساس دسته‌بندی
         eyeglasses_frames = []  # عینک طبی (ID: 18)
         sunglasses_frames = []  # عینک آفتابی (ID: 17)
         other_frames = []  # سایر انواع عینک
 
         for frame in all_frames:
+            # بررسی اینکه آیا محصول نامرتبط است
+            if is_unrelated_product(frame):
+                logger.info(f"محصول نامرتبط حذف شد: {frame.get('name', '')}")
+                continue
+
             # بررسی دسته‌بندی‌های هر محصول
             categories = frame.get("categories", [])
             category_ids = [cat.get("id") for cat in categories]

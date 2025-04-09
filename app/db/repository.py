@@ -711,7 +711,7 @@ async def get_conversion_stats(period: str = "month") -> Dict[str, Any]:
 
 async def save_woocommerce_cache(data: List[Dict[str, Any]], last_update: datetime) -> bool:
     """
-    ذخیره کش محصولات WooCommerce در دیتابیس.
+    ذخیره کش محصولات WooCommerce در دیتابیس به صورت چانک شده.
 
     Args:
         data: لیست محصولات
@@ -723,18 +723,36 @@ async def save_woocommerce_cache(data: List[Dict[str, Any]], last_update: dateti
     try:
         db = get_database()
 
-        # حذف رکورد قبلی
-        await db.woocommerce_cache.delete_many({"type": "products_cache"})
+        # حذف رکوردهای قبلی
+        await db.woocommerce_cache.delete_many({"type": {"$regex": "^products_cache"}})
 
-        # افزودن رکورد جدید
+        # محاسبه تعداد چانک‌ها (هر چانک 100 محصول)
+        chunk_size = 100
+        total_chunks = (len(data) + chunk_size -
+                        1) // chunk_size  # محاسبه سقف تقسیم
+
+        # ایجاد یک سند متا
         await db.woocommerce_cache.insert_one({
-            "type": "products_cache",
+            "type": "products_cache_meta",
             "last_update": last_update,
-            "data": data
+            "total_products": len(data),
+            "total_chunks": total_chunks
         })
 
+        # تقسیم داده‌ها به چانک‌های کوچکتر
+        for i in range(0, len(data), chunk_size):
+            chunk = data[i:i+chunk_size]
+            chunk_number = i // chunk_size
+
+            await db.woocommerce_cache.insert_one({
+                "type": f"products_cache_chunk_{chunk_number}",
+                "chunk_number": chunk_number,
+                "last_update": last_update,
+                "data": chunk
+            })
+
         logger.info(
-            f"کش محصولات WooCommerce در دیتابیس بروزرسانی شد ({len(data)} محصول)")
+            f"کش محصولات WooCommerce در {total_chunks} چانک در دیتابیس ذخیره شد")
         return True
 
     except Exception as e:
@@ -752,11 +770,23 @@ async def get_woocommerce_cache() -> Tuple[Optional[List[Dict[str, Any]]], Optio
     try:
         db = get_database()
 
-        # دریافت رکورد کش
-        cache_record = await db.woocommerce_cache.find_one({"type": "products_cache"})
+        # دریافت رکورد متا
+        meta_record = await db.woocommerce_cache.find_one({"type": "products_cache_meta"})
 
-        if cache_record and "data" in cache_record and "last_update" in cache_record:
-            return cache_record["data"], cache_record["last_update"]
+        if meta_record and "total_chunks" in meta_record and "last_update" in meta_record:
+            total_chunks = meta_record["total_chunks"]
+            last_update = meta_record["last_update"]
+
+            # دریافت تمام چانک‌ها و ترکیب آنها
+            all_products = []
+            for chunk_number in range(total_chunks):
+                chunk_record = await db.woocommerce_cache.find_one({"type": f"products_cache_chunk_{chunk_number}"})
+                if chunk_record and "data" in chunk_record:
+                    all_products.extend(chunk_record["data"])
+
+            logger.info(
+                f"کش محصولات از {total_chunks} چانک با موفقیت بازیابی شد")
+            return all_products, last_update
 
         return None, None
 

@@ -4,7 +4,8 @@ services:
   # سرویس API
   api:
     build: .
-    network_mode: "host"  # استفاده از شبکه میزبان برای حل مشکل VPN
+    ports:
+      - "8000:8000"  # مپینگ پورت 8000 برای دسترسی از بیرون
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
@@ -13,14 +14,14 @@ services:
       - API_PORT=8000
       - DEBUG=true
       - ENVIRONMENT=development
-      - MONGODB_HOST=localhost  # تغییر از mongo به localhost
+      - MONGODB_HOST=mongo  # استفاده از نام سرویس مانگو
       - MONGODB_PORT=27017
       - MONGODB_USERNAME=eyeglass_admin
       - MONGODB_PASSWORD=secure_password123
       - MONGODB_DB_NAME=eyeglass_recommendation
-      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@localhost:27017/eyeglass_recommendation?authSource=admin  # تغییر mongo به localhost
-      - CELERY_BROKER_URL=redis://localhost:6379/0  # تغییر redis به localhost
-      - CELERY_RESULT_BACKEND=redis://localhost:6379/0  # تغییر redis به localhost
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
       - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
       - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
@@ -34,20 +35,19 @@ services:
   # سرویس Celery Worker برای تشخیص چهره
   worker_face_detection:
     build: .
-    network_mode: "host"  # استفاده از شبکه میزبان برای حل مشکل VPN
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_face_detection@%h --queues=face_detection
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_face_detection@%h --queues=face_detection
     environment:
-      - MONGODB_HOST=localhost  # تغییر از mongo به localhost
+      - MONGODB_HOST=mongo
       - MONGODB_PORT=27017
       - MONGODB_USERNAME=eyeglass_admin
       - MONGODB_PASSWORD=secure_password123
       - MONGODB_DB_NAME=eyeglass_recommendation
-      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@localhost:27017/eyeglass_recommendation?authSource=admin  # تغییر mongo به localhost
-      - CELERY_BROKER_URL=redis://localhost:6379/0  # تغییر redis به localhost
-      - CELERY_RESULT_BACKEND=redis://localhost:6379/0  # تغییر redis به localhost
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
       - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
       - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
@@ -61,20 +61,19 @@ services:
   # سرویس Celery Worker برای تحلیل چهره
   worker_face_analysis:
     build: .
-    network_mode: "host"  # استفاده از شبکه میزبان برای حل مشکل VPN
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_face_analysis@%h --queues=face_analysis
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_face_analysis@%h --queues=face_analysis
     environment:
-      - MONGODB_HOST=localhost  # تغییر از mongo به localhost
+      - MONGODB_HOST=mongo
       - MONGODB_PORT=27017
       - MONGODB_USERNAME=eyeglass_admin
       - MONGODB_PASSWORD=secure_password123
       - MONGODB_DB_NAME=eyeglass_recommendation
-      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@localhost:27017/eyeglass_recommendation?authSource=admin  # تغییر mongo به localhost
-      - CELERY_BROKER_URL=redis://localhost:6379/0  # تغییر redis به localhost
-      - CELERY_RESULT_BACKEND=redis://localhost:6379/0  # تغییر redis به localhost
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
       - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
       - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
@@ -88,20 +87,19 @@ services:
   # سرویس Celery Worker برای پیشنهاد فریم
   worker_frame_matching:
     build: .
-    network_mode: "host"  # استفاده از شبکه میزبان برای حل مشکل VPN
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_frame_matching@%h --queues=frame_matching
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1 --hostname=worker_frame_matching@%h --queues=frame_matching
     environment:
-      - MONGODB_HOST=localhost  # تغییر از mongo به localhost
+      - MONGODB_HOST=mongo
       - MONGODB_PORT=27017
       - MONGODB_USERNAME=eyeglass_admin
       - MONGODB_PASSWORD=secure_password123
       - MONGODB_DB_NAME=eyeglass_recommendation
-      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@localhost:27017/eyeglass_recommendation?authSource=admin  # تغییر mongo به localhost
-      - CELERY_BROKER_URL=redis://localhost:6379/0  # تغییر redis به localhost
-      - CELERY_RESULT_BACKEND=redis://localhost:6379/0  # تغییر redis به localhost
+      - MONGODB_URI=mongodb://eyeglass_admin:secure_password123@mongo:27017/eyeglass_recommendation?authSource=admin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - WOOCOMMERCE_API_URL=https://lunato.shop/wp-json/wc/v3/products
       - WOOCOMMERCE_CONSUMER_KEY=ck_818f6ea310b3712583afc0d2f12657ae78440b38
       - WOOCOMMERCE_CONSUMER_SECRET=cs_b9e90f2f44c1f262049c7acda1933610fb182571
