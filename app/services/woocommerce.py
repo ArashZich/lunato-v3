@@ -74,8 +74,8 @@ async def initialize_product_cache():
                     # بررسی محصولات معتبر پس از بازیابی
                     valid_products = []
                     for product in product_cache:
-                        # بررسی قیمت و permalink معتبر
-                        if (product.get("price") is not None and product.get("price") != "" and
+                        # تغییر از بررسی قیمت به بررسی stock_status
+                        if (product.get("stock_status") == "instock" and
                             "/product/" in product.get("permalink", "") and
                                 "/?post_type=product&p=" not in product.get("permalink", "")):
                             valid_products.append(product)
@@ -248,6 +248,7 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
 
         # مقداردهی اولیه لیست محصولات
         all_products = []
+        total_downloaded = 0
 
         async with aiohttp.ClientSession() as session:
             # دانلود محصولات از هر دسته‌بندی
@@ -284,6 +285,7 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
                                     f"دانلود محصولات دسته‌بندی {category['name']} کامل شد. صفحه آخر: {page-1}")
                                 break
 
+                            total_downloaded += len(products)
                             logger.info(
                                 f"دانلود صفحه {page} از دسته‌بندی {category['name']} با {len(products)} محصول انجام شد")
                             category_products.extend(products)
@@ -312,31 +314,33 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
 
         logger.info(f"پیش‌پردازش {len(all_products)} محصول دانلود شده...")
 
+        # شمارنده‌های فیلتر
+        # محصولات ناموجود (stock_status != instock)
+        out_of_stock_count = 0
+        invalid_permalink_count = 0   # محصولات با permalink نامعتبر
+        unrelated_count = 0          # محصولات نامرتبط
+        non_eyeglass_count = 0       # محصولات غیر فریم عینک
+        lens_package_count = 0       # عدسی‌ها و پکیج‌های عدسی
+        no_image_count = 0           # محصولات بدون تصویر
+        valid_count = 0              # محصولات معتبر نهایی
+
         # پیش‌پردازش محصولات
         processed_products = []
         for product in all_products:
-
-            # بررسی قیمت محصول - محصولات بدون قیمت را نادیده می‌گیریم
-            if product.get("price") is None or product.get("price") == "":
-                logger.debug(
-                    f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
-                continue
-
-            # اضافه کردن این شرط برای فیلتر کردن محصولات ناموجود
-            if product.get("price_html") == "ناموجود" or "ناموجود" in product.get("price_html", ""):
-                logger.debug(
-                    f"محصول با ID {product.get('id')} ناموجود است (price_html: ناموجود)")
+            # بررسی وضعیت موجودی - محصولات ناموجود را نادیده می‌گیریم
+            if product.get("stock_status") != "instock":
+                out_of_stock_count += 1
                 continue
 
             # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
             permalink = product.get("permalink", "")
             if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
-                logger.debug(
-                    f"محصول با ID {product.get('id')} لینک نامعتبر دارد: {permalink}")
+                invalid_permalink_count += 1
                 continue
 
             # فیلتر کردن محصولات نامرتبط
             if is_unrelated_product(product):
+                unrelated_count += 1
                 continue
 
             # افزودن فیلد نوع فریم
@@ -345,15 +349,37 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
             # افزودن فیلد آیا فریم عینک است
             product["is_eyeglass_frame"] = is_eyeglass_frame(product)
 
-            # فیلتر کردن عدسی‌ها و پکیج عدسی
-            if is_eyeglass_frame(product) and not is_lens_or_lens_package(product):
-                # فیلتر کردن محصولات بدون عکس
-                if product.get("images"):
-                    processed_products.append(product)
+            if not is_eyeglass_frame(product):
+                non_eyeglass_count += 1
+                continue
 
-        eyeglass_count = len(processed_products)
+            # فیلتر کردن عدسی‌ها و پکیج عدسی
+            if is_lens_or_lens_package(product):
+                lens_package_count += 1
+                continue
+
+            # فیلتر کردن محصولات بدون عکس
+            if not product.get("images"):
+                no_image_count += 1
+                continue
+
+            # اضافه کردن محصول معتبر
+            processed_products.append(product)
+            valid_count += 1
+
+        # لاگ‌های وضعیت فیلترها
+        logger.info("===== آمار فیلتر محصولات =====")
+        logger.info(f"تعداد کل محصولات دانلود شده: {len(all_products)}")
         logger.info(
-            f"دانلود و پیش‌پردازش کامل شد. تعداد کل محصولات: {len(all_products)}, تعداد فریم عینک پس از فیلتر: {eyeglass_count}")
+            f"محصولات ناموجود (stock_status != instock): {out_of_stock_count}")
+        logger.info(f"محصولات با لینک نامعتبر: {invalid_permalink_count}")
+        logger.info(f"محصولات نامرتبط: {unrelated_count}")
+        logger.info(f"محصولات غیر فریم عینک: {non_eyeglass_count}")
+        logger.info(f"عدسی‌ها و پکیج‌های عدسی: {lens_package_count}")
+        logger.info(f"محصولات بدون تصویر: {no_image_count}")
+        logger.info(f"تعداد محصولات معتبر نهایی: {valid_count}")
+        logger.info("================================")
+
         return processed_products
 
     except Exception as e:
@@ -371,15 +397,11 @@ def is_valid_product(product: Dict[str, Any]) -> bool:
     Returns:
         bool: True اگر محصول معتبر باشد
     """
-    # بررسی وجود قیمت معتبر
-    if product.get("price") is None or product.get("price") == "":
-        logger.debug(f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
-        return False
 
-    # بررسی وضعیت موجودی از طریق price_html
-    if product.get("price_html") == "ناموجود" or "ناموجود" in product.get("price_html", ""):
+    # تغییر بررسی قیمت به بررسی stock_status
+    if product.get("stock_status") != "instock":
         logger.debug(
-            f"محصول با ID {product.get('id')} ناموجود است (price_html: ناموجود)")
+            f"محصول با ID {product.get('id')} ناموجود است (stock_status != instock)")
         return False
 
     # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
@@ -686,8 +708,9 @@ async def get_eyeglass_frames(min_price: Optional[float] = None, max_price: Opti
     # فیلتر کردن فریم‌های عینک معتبر
     eyeglass_frames = []
     for product in products:
-        # بررسی قیمت محصول
-        if product.get("price") is None or product.get("price") == "":
+
+        # بررسی وضعیت موجودی
+        if product.get("stock_status") != "instock":
             continue
 
         # بررسی permalink
@@ -905,6 +928,9 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
         # دریافت فریم‌های عینک از کش
         all_frames = await get_eyeglass_frames(min_price, max_price)
 
+        logger.info(
+            f"تعداد کل فریم‌های عینک پس از فیلتر اولیه: {len(all_frames)}")
+
         if not all_frames:
             logger.error("خطا در دریافت فریم‌های عینک از کش")
             return {
@@ -1027,11 +1053,40 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
         # ایجاد تنوع در نتایج نهایی با جابجایی تصادفی
         random.shuffle(selected_frames)
 
+        logger.info(
+            f"تعداد فریم‌های انتخاب شده (قبل از نهایی): {len(selected_frames)}")
+
+        # اگر تعداد فریم‌های انتخاب شده کمتر از حد مورد نظر است
+        if len(selected_frames) < limit:
+            logger.warning(
+                f"تعداد فریم‌های انتخابی ({len(selected_frames)}) کمتر از تعداد درخواستی ({limit}) است")
+
+            # استفاده از تمام فریم‌های موجود
+            all_sorted_frames = sorted(all_frames, key=lambda x: x.get(
+                "match_score", 0) if "match_score" in x else calculate_match_score(face_shape, get_frame_type(x)), reverse=True)
+
+            # فیلتر کردن فریم‌هایی که قبلاً انتخاب شده‌اند
+            remaining_frames = [
+                f for f in all_sorted_frames if f not in selected_frames]
+
+            # اضافه کردن فریم‌های باقیمانده تا رسیدن به تعداد درخواستی
+            frames_to_add = min(limit - len(selected_frames),
+                                len(remaining_frames))
+            if frames_to_add > 0:
+                additional_frames = remaining_frames[:frames_to_add]
+                selected_frames.extend(additional_frames)
+                logger.info(
+                    f"{frames_to_add} فریم اضافی برای رسیدن به تعداد درخواستی اضافه شد")
+
+        # محدود کردن به تعداد درخواستی
+        if len(selected_frames) > limit:
+            selected_frames = selected_frames[:limit]
+
         # تبدیل به فرمت پاسخ مورد نظر
         recommended_frames = []
         for product in selected_frames:
-            # بررسی قیمت محصول - محصولات بدون قیمت را نادیده می‌گیریم
-            if product.get("price") is None or product.get("price") == "":
+            # بررسی وضعیت موجودی - محصولات ناموجود را نادیده می‌گیریم
+            if product.get("stock_status") != "instock":
                 continue
 
             # بررسی permalink
@@ -1064,6 +1119,8 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
                 "match_score": match_score
             })
 
+        logger.info(
+            f"تعداد نهایی فریم‌های پیشنهادی: {len(recommended_frames)}")
         logger.info(
             f"پیشنهاد فریم کامل شد: {len(recommended_frames)} توصیه (طبی: {len(selected_eyeglasses)}, آفتابی: {len(selected_sunglasses)}, سایر: {len(selected_others)})")
 

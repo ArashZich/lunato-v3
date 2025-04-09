@@ -1,8 +1,13 @@
+من متوجه شدم - این راهنمای اصلاح سیستم تشخیص چهره و دانلود محصولات WooCommerce است که باید با توجه به تغییرات جدیدی که ما در کد انجام دادیم، به‌روزرسانی شود.
+
+برای این فایل راهنما، باید بخش‌هایی که مربوط به `price` و `price_html` هستند را با `stock_status` جایگزین کنیم. ویرایش پیشنهادی من برای این راهنما به شرح زیر است:
+
+```markdown
 # راهنمای اصلاح سیستم تشخیص چهره و دانلود محصولات WooCommerce
 
 در این راهنما، تغییرات مورد نیاز برای حل سه مشکل اصلی پروژه شرح داده شده است:
 1. بهبود لاگ‌های مربوط به دانلود محصولات WooCommerce
-2. فیلتر کردن محصولات بدون قیمت و لینک‌های نامعتبر
+2. فیلتر کردن محصولات ناموجود و لینک‌های نامعتبر
 3. اصلاح سیستم تشخیص شکل چهره
 
 ## 1. بهبود لاگ‌های دانلود محصولات WooCommerce و فیلتر کردن محصولات نامعتبر
@@ -23,8 +28,8 @@ logger.info(f"کش محصولات در دیتابیس منقضی شده است (
 # بررسی محصولات معتبر پس از بازیابی
 valid_products = []
 for product in product_cache:
-    # بررسی قیمت و permalink معتبر
-    if (product.get("price") is not None and product.get("price") != "" and
+    # تغییر از بررسی قیمت به بررسی stock_status
+    if (product.get("stock_status") == "instock" and
         "/product/" in product.get("permalink", "") and
         "/?post_type=product&p=" not in product.get("permalink", "")):
         valid_products.append(product)
@@ -81,18 +86,12 @@ logger.info(f"دانلود و پیش‌پردازش کامل شد. تعداد ک
 ```python
 logger.info(f"تلاش مجدد برای دانلود صفحه {page} از دسته‌بندی {category['name']} پس از 2 ثانیه...")
 ```
-- افزودن فیلتر برای محصولات بدون قیمت:
-```python
-# بررسی قیمت محصول - محصولات بدون قیمت را نادیده می‌گیریم
-if product.get("price") is None or product.get("price") == "":
-    logger.debug(f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
-    continue
-```
 - افزودن فیلتر برای محصولات ناموجود:
 ```python
-# بررسی قیمت محصول - محصولات بدون قیمت را نادیده می‌گیریم
-if product.get("price_html") == "ناموجود" or "ناموجود" in product.get("price_html", ""):
-    logger.debug(f"محصول با ID {product.get('id')} ناموجود است (price_html: ناموجود)")
+# بررسی وضعیت موجودی - محصولات ناموجود را نادیده می‌گیریم
+if product.get("stock_status") != "instock":
+    out_of_stock_count += 1
+    logger.debug(f"محصول با ID {product.get('id')} ناموجود است (stock_status != instock)")
     continue
 ```
 - افزودن فیلتر برای محصولات با لینک نامعتبر:
@@ -100,6 +99,7 @@ if product.get("price_html") == "ناموجود" or "ناموجود" in product.
 # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
 permalink = product.get("permalink", "")
 if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
+    invalid_permalink_count += 1
     logger.debug(f"محصول با ID {product.get('id')} لینک نامعتبر دارد: {permalink}")
     continue
 ```
@@ -116,13 +116,9 @@ def is_valid_product(product: Dict[str, Any]) -> bool:
     Returns:
         bool: True اگر محصول معتبر باشد
     """
-    # بررسی وجود قیمت معتبر
-    if product.get("price") is None or product.get("price") == "":
-        logger.debug(f"محصول با ID {product.get('id')} قیمت ندارد (ناموجود)")
-        return False
-
-    if product.get("price_html") == "ناموجود" or "ناموجود" in product.get("price_html", ""):
-        logger.debug(f"محصول با ID {product.get('id')} ناموجود است (price_html: ناموجود)")
+    # تغییر بررسی قیمت به بررسی stock_status
+    if product.get("stock_status") != "instock":
+        logger.debug(f"محصول با ID {product.get('id')} ناموجود است (stock_status != instock)")
         return False
 
     # بررسی permalink - فقط محصولاتی که لینک آنها با الگوی /product/ شروع می‌شود
@@ -212,11 +208,8 @@ async def get_eyeglass_frames(min_price: Optional[float] = None, max_price: Opti
     # فیلتر کردن فریم‌های عینک معتبر
     eyeglass_frames = []
     for product in products:
-        # بررسی قیمت محصول
-        if product.get("price") is None or product.get("price") == "":
-            continue
-
-        if product.get("price_html") == "ناموجود" or "ناموجود" in product.get("price_html", ""):
+        # بررسی وضعیت موجودی
+        if product.get("stock_status") != "instock":
             continue
 
         # بررسی permalink
@@ -398,7 +391,7 @@ if face_percentage < 5:
 ### 1. اجرای تدریجی تغییرات
 
 برای حل مشکلات، بهتر است تغییرات را به صورت تدریجی اعمال کنید:
-1. ابتدا تغییرات مربوط به لاگ‌های WooCommerce و فیلتر کردن محصولات نامعتبر را اعمال کنید
+1. ابتدا تغییرات مربوط به لاگ‌های WooCommerce و فیلتر کردن محصولات ناموجود را اعمال کنید
 2. سپس تغییرات مربوط به تشخیص شکل چهره را پیاده‌سازی کنید
 3. هر بخش را جداگانه تست کنید تا از درستی عملکرد آن مطمئن شوید
 
@@ -415,3 +408,6 @@ if face_percentage < 5:
 - **بهبود پیش‌پردازش تصویر**: افزودن مراحل پیش‌پردازش بیشتر مانند بهبود کنتراست و کاهش نویز
 - **مکانیزم بازخورد کاربر**: اضافه کردن امکان دریافت بازخورد از کاربر در مورد صحت تشخیص شکل چهره
 - **به‌روزرسانی مدل ML**: با جمع‌آوری داده‌های بیشتر، مدل ML را بهبود دهید
+```
+
+نکته: تمام تغییرات مهم در این راهنما انجام شده، به ویژه جایگزینی بررسی `price` و `price_html` با `stock_status` در بخش‌های مربوطه، و همچنین بهبود لاگ‌ها برای گزارش تعداد محصولات در هر مرحله از فیلترینگ.
