@@ -529,26 +529,25 @@ async def get_all_products() -> List[Dict[str, Any]]:
 def is_eyeglass_frame(product: Dict[str, Any]) -> bool:
     """
     بررسی اینکه آیا محصول یک فریم عینک است.
-
-    Args:
-        product: محصول WooCommerce
-
-    Returns:
-        bool: True اگر محصول فریم عینک باشد
     """
-    # بررسی دسته‌بندی‌های محصول
+    # بررسی ساده‌تر - فقط دسته‌بندی‌های اصلی عینک چک شوند
     categories = product.get("categories", [])
     for category in categories:
         category_id = category.get("id", 0)
-
-        # اگر محصول در یکی از دسته‌بندی‌های عینک باشد، آن را معتبر درنظر بگیر
-        if category_id in [5215, 18, 17, 5216]:  # دسته‌های مرتبط با عینک
-            # فقط بررسی کنیم محصول عدسی نباشد
-            if not is_lens_or_lens_package(product):
+        # اگر در یکی از دسته‌بندی‌های اصلی عینک است، معتبر تلقی شود
+        if category_id in [5215, 18, 17, 5216]:  # دسته‌های عینک
+            # فقط بررسی کنیم که نام محصول حاوی کلمه "عدسی" نباشد
+            name = product.get("name", "").lower()
+            if "lens" not in name and "عدسی" not in name and "پکیج" not in name:
                 return True
 
-    # اگر مطمئن نیستیم، پیش‌فرض را True قرار دهیم
-    return True
+    # بررسی اضافی اگر دسته‌بندی نداشت ولی در نام آن کلمه عینک یا فریم بود
+    name = product.get("name", "").lower()
+    if "عینک" in name or "فریم" in name or "eyeglasses" in name or "frame" in name:
+        if "lens" not in name and "عدسی" not in name and "پکیج" not in name:
+            return True
+
+    return False
 
 
 def get_frame_type(product: Dict[str, Any]) -> str:
@@ -950,11 +949,12 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
 
         # اگر تعداد فریم‌های موجود کمتر از حد درخواستی است، حداقل نیمی از فریم‌ها
         # را به فریم‌های پیشنهادی اختصاص می‌دهیم
+        # تعدیل این قسمت از کد
         if len(all_frames) < limit * 2:
             logger.warning(
                 f"تعداد کل فریم‌ها ({len(all_frames)}) کمتر از دو برابر حد درخواستی ({limit*2}) است")
-            recommended_limit = max(
-                min(len(all_frames), limit), len(all_frames) // 2)
+            # تغییر از 'len(all_frames) // 2' به 'min(len(all_frames), limit)'
+            recommended_limit = min(len(all_frames), limit)
         else:
             recommended_limit = limit
 
@@ -1031,38 +1031,31 @@ async def get_recommended_frames(face_shape: str, min_price: Optional[float] = N
 
         # تقسیم هر دسته به دو بخش: با امتیاز بالا و انتخاب تصادفی
         # برای هر دسته، 60% از محصولات بر اساس امتیاز و 40% به صورت تصادفی انتخاب می‌شوند
+        # این قسمت را در تابع get_recommended_frames جایگزین کن
+        # استفاده از تنوع بیشتر در انتخاب فریم‌ها
         def select_diverse_frames(frames, count):
             if not frames or count <= 0:
                 return []
 
-            # تعداد فریم‌های با امتیاز بالا
-            top_count = int(count * 0.6)
-            if top_count == 0:
-                top_count = 1
-
-            # تعداد فریم‌های تصادفی
-            random_count = count - top_count
-
-            # انتخاب فریم‌های با امتیاز بالا
+            # انتخاب فریم‌های با امتیاز بالا (50%)
+            top_count = max(1, int(count * 0.5))
             top_frames = frames[:top_count]
 
-            # انتخاب فریم‌های تصادفی از بقیه
-            remaining_frames = frames[top_count:] if len(
-                frames) > top_count else []
-
+            # انتخاب فریم‌های تصادفی از باقیمانده (50%)
+            remaining_frames = frames[top_count:]
+            random_count = count - top_count
             if remaining_frames and random_count > 0:
-                # انتخاب تصادفی از فریم‌های باقیمانده (بدون تکرار)
-                random_frames = random.sample(remaining_frames, min(
-                    random_count, len(remaining_frames)))
+                # اگر تعداد فریم‌های باقیمانده کمتر از تعداد مورد نیاز است، همه را انتخاب کن
+                if len(remaining_frames) <= random_count:
+                    random_frames = remaining_frames
+                else:
+                    random_frames = random.sample(
+                        remaining_frames, random_count)
             else:
                 random_frames = []
 
-            # ترکیب دو دسته
+            # ترکیب لیست‌ها
             selected = top_frames + random_frames
-
-            # برهم زدن ترتیب نتایج برای تنوع بیشتر
-            random.shuffle(selected)
-
             return selected
 
         # انتخاب فریم‌ها با روش متنوع
