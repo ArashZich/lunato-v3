@@ -328,18 +328,37 @@ async def fetch_all_woocommerce_products() -> List[Dict[str, Any]]:
         processed_products = []
         for product in all_products:
             # بررسی وضعیت موجودی - محصولات ناموجود را نادیده می‌گیریم
-            # اگر می‌خواهید محصولات ناموجود هم نمایش داده شوند، این شرط را تغییر دهید
             if product.get("stock_status") != "instock":
-                # اختیاری: می‌توانید این خط را حذف کنید تا محصولات ناموجود هم نمایش داده شوند
+                out_of_stock_count += 1
                 continue
 
             # بررسی permalink - فقط محصولاتی که لینک معتبر دارند
             permalink = product.get("permalink", "")
-            if "/?post_type=product&p=" in permalink:
+            if "/?post_type=product&p=" in permalink or not "/product/" in permalink:
                 invalid_permalink_count += 1
                 continue
 
-            # اضافه کردن محصول معتبر با یک شرط ساده‌تر
+            # بررسی عدم ارتباط با محصولات نامرتبط
+            if is_unrelated_product(product):
+                unrelated_count += 1
+                continue
+
+            # بررسی اینکه فریم عینک باشد
+            if not is_eyeglass_frame(product):
+                non_eyeglass_count += 1
+                continue
+
+            # بررسی اینکه عدسی یا پکیج عدسی نباشد
+            if is_lens_or_lens_package(product):
+                lens_package_count += 1
+                continue
+
+            # بررسی وجود تصویر
+            if not product.get("images"):
+                no_image_count += 1
+                continue
+
+            # اضافه کردن محصول معتبر
             processed_products.append(product)
             valid_count += 1
 
